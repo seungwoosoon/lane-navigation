@@ -23,5 +23,13 @@
         android:padding="8dp"
         />
 
+    <Button
+        android:id="@+id/btn_route"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="48dp"
+        android:text="routing request" />
+
 
 </FrameLayout>
