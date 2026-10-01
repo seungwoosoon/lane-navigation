@@ -18,3 +18,19 @@ data class RouteRequest(
 data class RouteResponse(
     val path: List<Point>
 )
+
+// 앱 → 서버: 1초마다 보내는 현재 GPS
+data class LocationUpdate(
+    val latitude: Double,
+    val longitude: Double,
+    val timestamp: Long
+)
+
+// 서버 → 앱: 위치 전송 응답 (ai_trigger 포함)
+data class NavResponse(
+    val ai_trigger: Boolean = false,
+    val maneuver: String? = null,
+    val total_lanes: Int? = null,
+    val required_lanes: List<Int>? = null,
+    val distance_to_maneuver: Int? = null
+)
