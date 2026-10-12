@@ -205,6 +205,7 @@ class MainActivity : AppCompatActivity() {
         btnRoute.isEnabled = true
         btnStop.isEnabled = false
         info.text = "내비게이션 중지"
+        kakaoMap.routeLineManager?.layer?.removeAll()
     }
 
     private fun sendLocationToServer(loc: Location) {

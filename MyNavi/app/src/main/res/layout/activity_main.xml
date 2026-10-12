@@ -16,7 +16,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="48dp"
         android:layout_marginStart="8dp"
         android:background="#CCFFFFFF"
         android:padding="8dp"
@@ -53,7 +53,9 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="경로 탐색" />
+                android:text="경로 탐색"
+                android:backgroundTint="#1A3A6B"
+                android:textColor="#FFFFFF" />
 
             <Button
                 android:id="@+id/btn_stop"
@@ -62,7 +64,9 @@
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
                 android:enabled="false"
-                android:text="중지" />
+                android:text="중지"
+                android:backgroundTint="#4A5568"
+                android:textColor="#FFFFFF" />
         </LinearLayout>
     </LinearLayout>
 
