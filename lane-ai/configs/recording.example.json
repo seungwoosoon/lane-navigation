@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "session_id": "run_001",
+  "timebase": "unix_ms",
+  "gps_path": "gps.csv",
+  "cameras": [
+    {
+      "camera_id": "left",
+      "video_path": "left.mp4",
+      "start_timestamp_ms": null,
+      "frame_timestamps_path": null
+    },
+    {
+      "camera_id": "right",
+      "video_path": "right.mp4",
+      "start_timestamp_ms": null,
+      "frame_timestamps_path": null
+    }
+  ]
+}
