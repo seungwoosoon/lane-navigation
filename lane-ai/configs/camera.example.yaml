@@ -1,0 +1,6 @@
+# TEMPLATE ONLY: measure each camera before filling these values.
+# No camera model, calibration convention, or vehicle axes are assumed.
+left:
+  calibration_file: null
+right:
+  calibration_file: null
