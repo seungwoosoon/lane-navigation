@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.location.Location
 import android.os.Bundle
 import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.util.Log
 import android.widget.Button
@@ -17,6 +18,7 @@ import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import java.util.Locale
 import com.example.mynavi.network.ApiClient
 import com.example.mynavi.network.LocationUpdate
 import com.example.mynavi.network.NavResponse
@@ -60,9 +62,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var kakaoMap: KakaoMap
+    private lateinit var tts: TextToSpeech
     private var myLabel: Label? = null
     private var currentLoc: Location? = null
     private var isNavigating = false
+    private var lastSpokenDistance = Int.MAX_VALUE
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -115,6 +119,12 @@ class MainActivity : AppCompatActivity() {
         btnRoute.setOnClickListener { requestRoute() }
         btnStop.setOnClickListener { stopNavigation() }
 
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts.language = Locale.KOREAN
+            }
+        }
+
         Log.e("KEYHASH", getKeyHash())
 
         mapView.start(
@@ -150,6 +160,11 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         mapView.pause()
+    }
+
+    override fun onDestroy() {
+        tts.shutdown()
+        super.onDestroy()
     }
 
     @SuppressLint("MissingPermission")
@@ -202,6 +217,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopNavigation() {
         isNavigating = false
+        lastSpokenDistance = Int.MAX_VALUE
         btnRoute.isEnabled = true
         btnStop.isEnabled = false
         info.text = "내비게이션 중지"
@@ -214,12 +230,41 @@ class MainActivity : AppCompatActivity() {
             override fun onResponse(call: Call<NavResponse>, response: Response<NavResponse>) {
                 val nav = response.body() ?: return
                 Log.d("NAV", "위치 전송 응답: $nav")
-                // TODO Phase 2: nav.ai_trigger == true 일 때 카메라/AI 실행
+                handleNavResponse(nav)
             }
             override fun onFailure(call: Call<NavResponse>, t: Throwable) {
                 Log.w("NAV", "위치 전송 실패: ${t.message}")
             }
         })
+    }
+
+    private fun handleNavResponse(nav: NavResponse) {
+        val dist = nav.distance_to_maneuver
+        if (nav.ai_trigger && dist != null) {
+            val maneuverText = when (nav.maneuver) {
+                "LEFT" -> "좌회전"
+                "RIGHT" -> "우회전"
+                "UTURN" -> "유턴"
+                else -> nav.maneuver ?: ""
+            }
+            val lanesText = nav.required_lanes?.joinToString(", ") { "${it}차선" } ?: ""
+
+            info.text = "⚠️ ${dist}m 앞 ${maneuverText} | ${lanesText}으로 이동"
+
+            val milestone = when {
+                dist <= 50 && lastSpokenDistance > 50 -> 50
+                dist <= 100 && lastSpokenDistance > 100 -> 100
+                dist <= 300 && lastSpokenDistance > 300 -> 300
+                else -> null
+            }
+            if (milestone != null) {
+                val msg = "${milestone}미터 앞 ${maneuverText}입니다. ${lanesText}으로 이동하세요."
+                tts.speak(msg, TextToSpeech.QUEUE_FLUSH, null, null)
+            }
+            lastSpokenDistance = dist
+        } else if (!nav.ai_trigger) {
+            lastSpokenDistance = Int.MAX_VALUE
+        }
     }
 
     private fun drawRoute(path: List<com.example.mynavi.network.Point>) {
