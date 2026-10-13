@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 
-@Service
 public class DummyRouteService implements RouteService {
 
     private static final int POINT_COUNT = 20;
