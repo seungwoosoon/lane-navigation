@@ -20,12 +20,12 @@ public class DummyRouteService implements RouteService {
         for (int i = 0; i < POINT_COUNT; i++) {
             double ratio = i / (double) (POINT_COUNT - 1);   // 0.0 ~ 1.0
 
-            double lat = request.startLat() + (request.endLat() - request.startLat()) * ratio;
-            double lng = request.startLng() + (request.endLng() - request.startLng()) * ratio;
+            double lat = request.start().lat() + (request.end().lat() - request.start().lat()) * ratio;
+            double lng = request.start().lng() + (request.end().lng() - request.start().lng()) * ratio;
 
             path.add(new Point(lat, lng));
         }
 
-        return new RouteResponse(path);
+        return new RouteResponse(1, path);
     }
 }
