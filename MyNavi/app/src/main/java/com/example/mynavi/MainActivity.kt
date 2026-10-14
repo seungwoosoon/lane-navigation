@@ -13,8 +13,12 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.util.Log
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -22,6 +26,7 @@ import java.util.Locale
 import com.example.mynavi.network.ApiClient
 import com.example.mynavi.network.LocationUpdate
 import com.example.mynavi.network.NavResponse
+import com.example.mynavi.network.Point
 import com.example.mynavi.network.RouteRequest
 import com.example.mynavi.network.RouteResponse
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -59,6 +64,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etDestination: EditText
     private lateinit var btnRoute: Button
     private lateinit var btnStop: Button
+    private lateinit var lanePanel: LinearLayout
+    private lateinit var tvManeuver: TextView
+    private lateinit var laneRow: LinearLayout
+    private lateinit var tvGuidance: TextView
 
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var kakaoMap: KakaoMap
@@ -67,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     private var currentLoc: Location? = null
     private var isNavigating = false
     private var lastSpokenDistance = Int.MAX_VALUE
+    private var currentRouteId = 0
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -115,6 +125,11 @@ class MainActivity : AppCompatActivity() {
         btnRoute = findViewById(R.id.btn_route)
         btnStop = findViewById(R.id.btn_stop)
         fused = LocationServices.getFusedLocationProviderClient(this)
+
+        lanePanel = findViewById(R.id.lane_panel)
+        tvManeuver = findViewById(R.id.tv_maneuver)
+        laneRow = findViewById(R.id.lane_row)
+        tvGuidance = findViewById(R.id.tv_guidance)
 
         btnRoute.setOnClickListener { requestRoute() }
         btnStop.setOnClickListener { stopNavigation() }
@@ -194,12 +209,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         info.text = "경로 요청 중..."
-        val request = RouteRequest(loc.latitude, loc.longitude, destLat, destLng)
+        val request = RouteRequest(
+            start = Point(loc.latitude, loc.longitude),
+            end = Point(destLat, destLng)
+        )
 
         ApiClient.routeApi.getRoute(request).enqueue(object : Callback<RouteResponse> {
             override fun onResponse(call: Call<RouteResponse>, response: Response<RouteResponse>) {
                 val body = response.body()
                 if (body != null) {
+                    currentRouteId = body.routeId
                     drawRoute(body.path)
                     isNavigating = true
                     btnRoute.isEnabled = false
@@ -218,6 +237,7 @@ class MainActivity : AppCompatActivity() {
     private fun stopNavigation() {
         isNavigating = false
         lastSpokenDistance = Int.MAX_VALUE
+        currentRouteId = 0
         btnRoute.isEnabled = true
         btnStop.isEnabled = false
         info.text = "내비게이션 중지"
@@ -225,7 +245,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendLocationToServer(loc: Location) {
-        val update = LocationUpdate(loc.latitude, loc.longitude, System.currentTimeMillis())
+        val update = LocationUpdate(currentRouteId, loc.latitude, loc.longitude, loc.speed.toDouble())
         ApiClient.routeApi.sendLocation(update).enqueue(object : Callback<NavResponse> {
             override fun onResponse(call: Call<NavResponse>, response: Response<NavResponse>) {
                 val nav = response.body() ?: return
@@ -239,35 +259,94 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleNavResponse(nav: NavResponse) {
-        val dist = nav.distance_to_maneuver
-        if (nav.ai_trigger && dist != null) {
-            val maneuverText = when (nav.maneuver) {
-                "LEFT" -> "좌회전"
-                "RIGHT" -> "우회전"
-                "UTURN" -> "유턴"
-                else -> nav.maneuver ?: ""
-            }
-            val lanesText = nav.required_lanes?.joinToString(", ") { "${it}차선" } ?: ""
+        if (nav.arrived) {
+            isNavigating = false
+            btnRoute.isEnabled = true
+            btnStop.isEnabled = false
+            kakaoMap.routeLineManager?.layer?.removeAll()
+            info.text = "목적지에 도착했습니다."
+            tts.speak("목적지에 도착했습니다.", TextToSpeech.QUEUE_FLUSH, null, null)
+            lastSpokenDistance = Int.MAX_VALUE
+            return
+        }
 
-            info.text = "⚠️ ${dist}m 앞 ${maneuverText} | ${lanesText}으로 이동"
+        val dist = nav.distanceToBranch
+        if (nav.guide && dist != null && nav.message != null) {
+            showLanePanel(nav)
 
             val milestone = when {
-                dist <= 50 && lastSpokenDistance > 50 -> 50
-                dist <= 100 && lastSpokenDistance > 100 -> 100
-                dist <= 300 && lastSpokenDistance > 300 -> 300
-                else -> null
+                dist <= 50 && lastSpokenDistance > 50 -> true
+                dist <= 100 && lastSpokenDistance > 100 -> true
+                dist <= 300 && lastSpokenDistance > 300 -> true
+                else -> false
             }
-            if (milestone != null) {
-                val msg = "${milestone}미터 앞 ${maneuverText}입니다. ${lanesText}으로 이동하세요."
-                tts.speak(msg, TextToSpeech.QUEUE_FLUSH, null, null)
+            if (milestone) {
+                tts.speak(nav.message, TextToSpeech.QUEUE_FLUSH, null, null)
             }
             lastSpokenDistance = dist
-        } else if (!nav.ai_trigger) {
+        } else if (!nav.guide) {
+            lanePanel.visibility = View.GONE
             lastSpokenDistance = Int.MAX_VALUE
         }
     }
 
-    private fun drawRoute(path: List<com.example.mynavi.network.Point>) {
+    private fun showLanePanel(nav: NavResponse) {
+        val maneuverKor = when (nav.maneuver) {
+            "LEFT" -> "좌회전"
+            "RIGHT" -> "우회전"
+            "UTURN" -> "유턴"
+            else -> nav.maneuver ?: ""
+        }
+        tvManeuver.text = "${nav.distanceToBranch}m 앞 $maneuverKor"
+        tvGuidance.text = nav.message
+
+        val total = nav.totalLanes ?: 3
+        val targets = nav.targetLanes ?: emptyList()
+        val current = nav.currentLane
+
+        laneRow.removeAllViews()
+        val dp = resources.displayMetrics.density
+        val cellSize = (56 * dp).toInt()
+        val margin = (4 * dp).toInt()
+
+        for (i in 1..total) {
+            val cell = TextView(this)
+            val params = LinearLayout.LayoutParams(cellSize, cellSize).apply {
+                setMargins(margin, 0, margin, 0)
+            }
+            cell.layoutParams = params
+            cell.gravity = Gravity.CENTER
+            cell.textSize = 22f
+
+            val bg = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE }
+
+            when {
+                current == i -> {
+                    bg.setColor(Color.WHITE)
+                    bg.setStroke((2 * dp).toInt(), Color.WHITE)
+                    cell.text = "🚗"
+                }
+                targets.contains(i) -> {
+                    bg.setColor(Color.rgb(255, 200, 0))
+                    bg.setStroke((2 * dp).toInt(), Color.WHITE)
+                    cell.text = "●"
+                    cell.setTextColor(Color.rgb(26, 58, 107))
+                }
+                else -> {
+                    bg.setColor(Color.TRANSPARENT)
+                    bg.setStroke((2 * dp).toInt(), Color.WHITE)
+                    cell.text = ""
+                    cell.setTextColor(Color.WHITE)
+                }
+            }
+            cell.background = bg
+            laneRow.addView(cell)
+        }
+
+        lanePanel.visibility = View.VISIBLE
+    }
+
+    private fun drawRoute(path: List<Point>) {
         val latLngs = path.map { LatLng.from(it.lat, it.lng) }
         val stylesSet = RouteLineStylesSet.from(
             RouteLineStyles.from(RouteLineStyle.from(16f, Color.rgb(30, 110, 255)))
