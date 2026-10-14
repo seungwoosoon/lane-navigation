@@ -1,4 +1,3 @@
 package com.example.naviserver.dto;
 
-public record RouteRequest(Point start, Point end) {
-}
+public record RouteRequest(Point start, Point end) {}

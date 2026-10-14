@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 @Service
 public class NavigationService {
@@ -15,20 +17,32 @@ public class NavigationService {
     @Autowired(required = false)
     private JdbcTemplate jdbcTemplate;
 
+    private final AtomicInteger routeIdCounter = new AtomicInteger(0);
+
+    private int currentRouteId = 0;
     private List<Point> routePoints = List.of();
     private List<ManeuverInfo> maneuvers = List.of();
     private int nextManeuverIdx = 0;
+    private Point destination = null;
 
     private static final double TRIGGER_DISTANCE_M = 300.0;
-    private static final double PASSED_DISTANCE_M = 30.0;
+    private static final double PASSED_DISTANCE_M = 20.0;
+    private static final double ARRIVED_DISTANCE_M = 30.0;
 
-    public void setRoute(List<Point> points, List<ManeuverInfo> maneuvers) {
+    public int setRoute(List<Point> points, List<ManeuverInfo> maneuvers, Point destination) {
         this.routePoints = new ArrayList<>(points);
         this.maneuvers = new ArrayList<>(maneuvers);
         this.nextManeuverIdx = 0;
+        this.destination = destination;
+        this.currentRouteId = routeIdCounter.incrementAndGet();
+        return currentRouteId;
     }
 
     public NavResponse processLocation(double lat, double lng) {
+        if (destination != null && distanceMeters(lat, lng, destination.lat(), destination.lng()) < ARRIVED_DISTANCE_M) {
+            return new NavResponse(false, null, null, null, null, null, "목적지에 도착했습니다.", true);
+        }
+
         while (nextManeuverIdx < maneuvers.size()) {
             ManeuverInfo m = maneuvers.get(nextManeuverIdx);
             if (distanceMeters(lat, lng, m.lat(), m.lng()) < PASSED_DISTANCE_M) {
@@ -39,19 +53,32 @@ public class NavigationService {
         }
 
         if (nextManeuverIdx >= maneuvers.size()) {
-            return new NavResponse(false, null, null, null, null);
+            return new NavResponse(false, null, null, null, null, null, null, false);
         }
 
         ManeuverInfo next = maneuvers.get(nextManeuverIdx);
         double dist = distanceMeters(lat, lng, next.lat(), next.lng());
+        int distInt = (int) dist;
 
         if (dist <= TRIGGER_DISTANCE_M) {
             int totalLanes = getLaneCount(lat, lng);
-            List<Integer> required = requiredLanes(next.type(), totalLanes);
-            return new NavResponse(true, next.type(), totalLanes, required, (int) dist);
+            List<Integer> targetLanes = targetLanes(next.type(), totalLanes);
+            String message = buildMessage(distInt, next.type(), targetLanes);
+            return new NavResponse(true, next.type(), distInt, totalLanes, null, targetLanes, message, false);
         }
 
-        return new NavResponse(false, null, null, null, (int) dist);
+        return new NavResponse(false, null, null, null, null, null, null, false);
+    }
+
+    private String buildMessage(int dist, String type, List<Integer> targetLanes) {
+        String maneuverKor = switch (type) {
+            case "LEFT" -> "좌회전";
+            case "RIGHT" -> "우회전";
+            case "UTURN" -> "유턴";
+            default -> type;
+        };
+        String lanes = targetLanes.stream().map(i -> i + "차선").collect(Collectors.joining(", "));
+        return dist + "m 앞 " + maneuverKor + ", " + lanes + "으로 이동하세요.";
     }
 
     private int getLaneCount(double lat, double lng) {
@@ -67,7 +94,7 @@ public class NavigationService {
         }
     }
 
-    private List<Integer> requiredLanes(String type, int total) {
+    private List<Integer> targetLanes(String type, int total) {
         return switch (type) {
             case "LEFT", "UTURN" -> List.of(1);
             case "RIGHT" -> List.of(total);

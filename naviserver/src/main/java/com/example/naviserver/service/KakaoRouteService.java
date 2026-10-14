@@ -33,10 +33,9 @@ public class KakaoRouteService implements RouteService {
     @Override
     public RouteResponse findRoute(RouteRequest req) {
         try {
-            // 카카오는 경도,위도 순서
             String url = String.format(
                     "https://apis-navi.kakaomobility.com/v1/directions?origin=%f,%f&destination=%f,%f&priority=RECOMMEND",
-                    req.startLng(), req.startLat(), req.endLng(), req.endLat()
+                    req.start().lng(), req.start().lat(), req.end().lng(), req.end().lat()
             );
 
             HttpHeaders headers = new HttpHeaders();
@@ -44,12 +43,12 @@ public class KakaoRouteService implements RouteService {
             HttpEntity<Void> entity = new HttpEntity<>(headers);
 
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-            System.out.println("[KAKAO RAW] " + resp.getBody());
             JsonNode root = objectMapper.readTree(resp.getBody());
             JsonNode sections = root.path("routes").get(0).path("sections");
 
             List<Point> routePoints = new ArrayList<>();
             List<ManeuverInfo> maneuvers = new ArrayList<>();
+            Point destination = req.end();
 
             for (JsonNode section : sections) {
                 for (JsonNode road : section.path("roads")) {
@@ -63,17 +62,21 @@ public class KakaoRouteService implements RouteService {
 
                 for (JsonNode guide : section.path("guides")) {
                     int type = guide.path("type").asInt();
-                    if (type == 5) continue; // 목적지 도착은 건너뜀
+                    if (type == 100) continue; // 출발지
+                    if (type == 101) {          // 목적지: 좌표만 저장
+                        destination = new Point(guide.path("y").asDouble(), guide.path("x").asDouble());
+                        continue;
+                    }
                     String maneuverType = toManeuverType(type);
-                    if (maneuverType.equals("STRAIGHT")) continue; // 직진은 트리거 없음
+                    if (maneuverType.equals("STRAIGHT")) continue;
                     double lat = guide.path("y").asDouble();
                     double lng = guide.path("x").asDouble();
                     maneuvers.add(new ManeuverInfo(lat, lng, maneuverType));
                 }
             }
 
-            navigationService.setRoute(routePoints, maneuvers);
-            return new RouteResponse(routePoints);
+            int routeId = navigationService.setRoute(routePoints, maneuvers, destination);
+            return new RouteResponse(routeId, routePoints);
 
         } catch (Exception e) {
             return fallbackRoute(req);
@@ -94,11 +97,11 @@ public class KakaoRouteService implements RouteService {
         for (int i = 0; i < 20; i++) {
             double r = i / 19.0;
             path.add(new Point(
-                    req.startLat() + (req.endLat() - req.startLat()) * r,
-                    req.startLng() + (req.endLng() - req.startLng()) * r
+                    req.start().lat() + (req.end().lat() - req.start().lat()) * r,
+                    req.start().lng() + (req.end().lng() - req.start().lng()) * r
             ));
         }
-        navigationService.setRoute(path, List.of());
-        return new RouteResponse(path);
+        int routeId = navigationService.setRoute(path, List.of(), req.end());
+        return new RouteResponse(routeId, path);
     }
 }

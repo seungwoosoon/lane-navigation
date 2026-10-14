@@ -3,9 +3,12 @@ package com.example.naviserver.dto;
 import java.util.List;
 
 public record NavResponse(
-        boolean ai_trigger,
+        boolean guide,
         String maneuver,
-        Integer total_lanes,
-        List<Integer> required_lanes,
-        Integer distance_to_maneuver
+        Integer distanceToBranch,
+        Integer totalLanes,
+        Integer currentLane,
+        List<Integer> targetLanes,
+        String message,
+        boolean arrived
 ) {}

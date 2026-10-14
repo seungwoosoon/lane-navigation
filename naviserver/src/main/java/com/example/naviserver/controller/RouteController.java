@@ -30,6 +30,6 @@ public class RouteController {
 
     @PostMapping("/location")
     public NavResponse location(@RequestBody LocationUpdate update) {
-        return navigationService.processLocation(update.latitude(), update.longitude());
+        return navigationService.processLocation(update.lat(), update.lng());
     }
 }
