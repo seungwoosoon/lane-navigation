@@ -3,12 +3,10 @@ package com.example.naviserver.service;
 import com.example.naviserver.dto.Point;
 import com.example.naviserver.dto.RouteRequest;
 import com.example.naviserver.dto.RouteResponse;
-import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 
-@Service
 public class DummyRouteService implements RouteService {
 
     private static final int POINT_COUNT = 20;
@@ -18,11 +16,9 @@ public class DummyRouteService implements RouteService {
         List<Point> path = new ArrayList<>();
 
         for (int i = 0; i < POINT_COUNT; i++) {
-            double ratio = i / (double) (POINT_COUNT - 1);   // 0.0 ~ 1.0
-
+            double ratio = i / (double) (POINT_COUNT - 1);
             double lat = request.start().lat() + (request.end().lat() - request.start().lat()) * ratio;
             double lng = request.start().lng() + (request.end().lng() - request.start().lng()) * ratio;
-
             path.add(new Point(lat, lng));
         }
 

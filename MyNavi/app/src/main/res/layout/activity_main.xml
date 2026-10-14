@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -16,20 +15,99 @@
         android:id="@+id/info"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="#CCFFFFFF"
-        android:text="pending location..."
-        android:textColor="#000000"
+        android:layout_gravity="top|start"
         android:layout_marginTop="48dp"
+        android:layout_marginStart="8dp"
+        android:background="#CCFFFFFF"
         android:padding="8dp"
-        />
+        android:text="위치 수신 대기중..."
+        android:textColor="#000000" />
 
-    <Button
-        android:id="@+id/btn_route"
-        android:layout_width="wrap_content"
+    <!-- 차선 안내 패널 (guide=true 일 때만 표시) -->
+    <LinearLayout
+        android:id="@+id/lane_panel"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="48dp"
-        android:text="routing request" />
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="172dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:background="#EE1A3A6B"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:visibility="gone">
 
+        <TextView
+            android:id="@+id/tv_maneuver"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/lane_row"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal" />
+
+        <TextView
+            android:id="@+id/tv_guidance"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="32dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:background="#CCFFFFFF"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <EditText
+            android:id="@+id/et_destination"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="목적지 (예: 37.4502,126.6533)"
+            android:inputType="text"
+            android:singleLine="true" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_route"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="경로 탐색"
+                android:backgroundTint="#1A3A6B"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/btn_stop"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="중지"
+                android:backgroundTint="#4A5568"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+    </LinearLayout>
 
 </FrameLayout>
