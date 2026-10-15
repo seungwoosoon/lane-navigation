@@ -84,11 +84,22 @@ public class NavigationService {
     private int getLaneCount(double lat, double lng) {
         if (jdbcTemplate == null) return 3;
         try {
-            Integer lanes = jdbcTemplate.queryForObject(
-                "SELECT lanes FROM a2_link ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint(?, ?), 4326) LIMIT 1",
+            Integer lanes = jdbcTemplate.queryForObject("""
+                WITH RECURSIVE lanes AS (
+                    SELECT id, laneno, r_linkid, l_linkid
+                    FROM a2_link
+                    WHERE id = (SELECT id FROM a2_link
+                                ORDER BY geom <-> ST_Transform(ST_SetSRID(ST_MakePoint(?, ?), 4326), 5179) LIMIT 1)
+                    UNION
+                    SELECT nxt.id, nxt.laneno, nxt.r_linkid, nxt.l_linkid
+                    FROM a2_link nxt
+                    JOIN lanes ON nxt.id = lanes.r_linkid OR nxt.id = lanes.l_linkid
+                )
+                SELECT COUNT(*) FROM lanes
+                """,
                 Integer.class, lng, lat
             );
-            return (lanes != null) ? lanes : 3;
+            return (lanes != null && lanes > 0) ? lanes : 3;
         } catch (Exception e) {
             return 3;
         }

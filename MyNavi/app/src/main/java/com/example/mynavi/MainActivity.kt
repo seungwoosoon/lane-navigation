@@ -3,6 +3,7 @@ package com.example.mynavi
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.view.MotionEvent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -77,6 +78,8 @@ class MainActivity : AppCompatActivity() {
     private var isNavigating = false
     private var lastSpokenDistance = Int.MAX_VALUE
     private var currentRouteId = 0
+    private var lastUserInteractionTime = 0L
+    private val AUTO_CENTER_DELAY_MS = 5000L
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -97,7 +100,10 @@ class MainActivity : AppCompatActivity() {
                     "정확도 ${String.format("%.0f", loc.accuracy)}m"
 
             val latLng = LatLng.from(loc.latitude, loc.longitude)
-            kakaoMap.moveCamera(CameraUpdateFactory.newCenterPosition(latLng))
+            val now = System.currentTimeMillis()
+            if (now - lastUserInteractionTime > AUTO_CENTER_DELAY_MS) {
+                kakaoMap.moveCamera(CameraUpdateFactory.newCenterPosition(latLng))
+            }
 
             if (myLabel == null) {
                 val styles = kakaoMap.labelManager!!
@@ -165,6 +171,11 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        lastUserInteractionTime = System.currentTimeMillis()
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onResume() {
@@ -264,9 +275,18 @@ class MainActivity : AppCompatActivity() {
             btnRoute.isEnabled = true
             btnStop.isEnabled = false
             kakaoMap.routeLineManager?.layer?.removeAll()
-            info.text = "목적지에 도착했습니다."
             tts.speak("목적지에 도착했습니다.", TextToSpeech.QUEUE_FLUSH, null, null)
             lastSpokenDistance = Int.MAX_VALUE
+
+            tvManeuver.text = "목적지 도착"
+            tvGuidance.text = "목적지에 도착했습니다."
+            laneRow.removeAllViews()
+            laneRow.visibility = View.GONE
+            lanePanel.visibility = View.VISIBLE
+            lanePanel.postDelayed({
+                lanePanel.visibility = View.GONE
+                laneRow.visibility = View.VISIBLE
+            }, 3000)
             return
         }
 
