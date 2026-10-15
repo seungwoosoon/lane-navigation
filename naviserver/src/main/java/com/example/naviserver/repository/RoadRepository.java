@@ -1,9 +1,13 @@
 package com.example.naviserver.repository;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import javax.sql.DataSource;
+
 @Repository
+@ConditionalOnBean(DataSource.class)
 public class RoadRepository {
     private final JdbcTemplate jdbcTemplate;
     public RoadRepository(JdbcTemplate jdbcTemplate){this.jdbcTemplate = jdbcTemplate;}
