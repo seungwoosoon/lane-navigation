@@ -20,6 +20,7 @@ data class NavResponse(
     val totalLanes: Int? = null,
     val currentLane: Int? = null,
     val targetLanes: List<Int>? = null,
+    val laneDirections: List<List<String>>? = null,   // 차로별 실제 진행 방향 (0번 = 1차로)
     val message: String? = null,
     val arrived: Boolean = false
 )

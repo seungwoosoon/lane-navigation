@@ -423,7 +423,7 @@ class MainActivity : AppCompatActivity() {
 
         // 정밀지도 범위 밖이라 서버가 차로 수를 모르면 차로 그림은 숨기고 회전 안내만 보여준다
         if (total != null && total > 0) {
-            laneView.setLanes(total, targets, current, nav.maneuver)
+            laneView.setLanes(total, targets, current, nav.maneuver, nav.laneDirections)
             laneBody.visibility = View.VISIBLE
         } else {
             laneBody.visibility = View.GONE

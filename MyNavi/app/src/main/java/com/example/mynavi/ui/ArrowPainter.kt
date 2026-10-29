@@ -8,6 +8,7 @@ import android.graphics.RectF
 /**
  * 회전 화살표를 정사각형 칸(x, y, 한 변 s) 안에 그린다.
  * type: LEFT, RIGHT, UTURN, ARRIVE(체크 표시), 그 외는 직진.
+ * drawLane: 한 차로에서 갈 수 있는 방향이 여러 개면(예: 직진+우회전) 줄기 하나에서 갈라지는 화살표로 그린다.
  */
 object ArrowPainter {
 
@@ -44,6 +45,61 @@ object ArrowPainter {
             "UTURN" -> drawUTurn(c, x, y, s)
             "ARRIVE" -> drawCheck(c, x, y, s)
             else -> drawStraight(c, x, y, s)
+        }
+    }
+
+    /** 차로 화살표. types 예: [STRAIGHT], [LEFT, STRAIGHT], [STRAIGHT, RIGHT] */
+    fun drawLane(c: Canvas, types: List<String>, x: Float, y: Float, s: Float, color: Int) {
+        if (types.size <= 1) {
+            draw(c, types.firstOrNull(), x, y, s, color)
+            return
+        }
+        stroke.color = color
+        stroke.strokeWidth = s * 0.13f
+        head.color = color
+        head.strokeWidth = s * 0.03f
+
+        val cx = x + s / 2f
+        val branchY = y + s * 0.56f   // 줄기가 갈라지는 높이
+        val yh = y + s * 0.42f        // 좌/우 가지 높이
+        val r = s * 0.14f             // 꺾이는 부분 둥글기
+
+        // 공통 줄기
+        path.reset()
+        path.moveTo(cx, y + s * 0.94f)
+        path.lineTo(cx, branchY)
+        c.drawPath(path, stroke)
+
+        for (type in types) {
+            path.reset()
+            when (type) {
+                "LEFT", "RIGHT" -> {
+                    val dir = if (type == "LEFT") -1f else 1f
+                    path.moveTo(cx, branchY)
+                    path.quadTo(cx, yh, cx + dir * r, yh)
+                    path.lineTo(cx + dir * s * 0.20f, yh)
+                    c.drawPath(path, stroke)
+                    if (type == "LEFT") headLeft(c, x + s * 0.04f, yh, s, SMALL_LEN, SMALL_HALF)
+                    else headRight(c, x + s * 0.96f, yh, s, SMALL_LEN, SMALL_HALF)
+                }
+                "UTURN" -> {
+                    // 줄기 아래쪽에서 왼쪽으로 돌아 내려오는 작은 유턴
+                    val ru = s * 0.12f
+                    val ay = y + s * 0.68f
+                    path.moveTo(cx, ay)
+                    oval.set(cx - 2 * ru, ay - ru, cx, ay + ru)
+                    path.arcTo(oval, 0f, -180f, false)
+                    path.lineTo(cx - 2 * ru, y + s * 0.80f)
+                    c.drawPath(path, stroke)
+                    headDown(c, cx - 2 * ru, y + s * 0.98f, s, SMALL_LEN * 0.8f, SMALL_HALF * 0.8f)
+                }
+                else -> {
+                    path.moveTo(cx, branchY)
+                    path.lineTo(cx, y + s * 0.28f)
+                    c.drawPath(path, stroke)
+                    headUp(c, cx, y + s * 0.04f, s, SMALL_LEN, SMALL_HALF)
+                }
+            }
         }
     }
 
@@ -96,30 +152,42 @@ object ArrowPainter {
     // ---- 화살촉 (꼭짓점 위치 기준) ----
     private const val HEAD_LEN = 0.36f
     private const val HEAD_HALF = 0.27f
+    // 여러 방향 화살표용 작은 화살촉
+    private const val SMALL_LEN = 0.24f
+    private const val SMALL_HALF = 0.16f
 
-    private fun headUp(c: Canvas, ax: Float, ay: Float, s: Float) {
+    private fun headUp(c: Canvas, ax: Float, ay: Float, s: Float, len: Float = HEAD_LEN, half: Float = HEAD_HALF) {
         path.reset()
         path.moveTo(ax, ay)
-        path.lineTo(ax + s * HEAD_HALF, ay + s * HEAD_LEN)
-        path.lineTo(ax - s * HEAD_HALF, ay + s * HEAD_LEN)
+        path.lineTo(ax + s * half, ay + s * len)
+        path.lineTo(ax - s * half, ay + s * len)
         path.close()
         c.drawPath(path, head)
     }
 
-    private fun headLeft(c: Canvas, ax: Float, ay: Float, s: Float) {
+    private fun headLeft(c: Canvas, ax: Float, ay: Float, s: Float, len: Float = HEAD_LEN, half: Float = HEAD_HALF) {
         path.reset()
         path.moveTo(ax, ay)
-        path.lineTo(ax + s * HEAD_LEN, ay - s * HEAD_HALF)
-        path.lineTo(ax + s * HEAD_LEN, ay + s * HEAD_HALF)
+        path.lineTo(ax + s * len, ay - s * half)
+        path.lineTo(ax + s * len, ay + s * half)
         path.close()
         c.drawPath(path, head)
     }
 
-    private fun headDown(c: Canvas, ax: Float, ay: Float, s: Float) {
+    private fun headRight(c: Canvas, ax: Float, ay: Float, s: Float, len: Float, half: Float) {
         path.reset()
         path.moveTo(ax, ay)
-        path.lineTo(ax - s * HEAD_HALF, ay - s * HEAD_LEN)
-        path.lineTo(ax + s * HEAD_HALF, ay - s * HEAD_LEN)
+        path.lineTo(ax - s * len, ay - s * half)
+        path.lineTo(ax - s * len, ay + s * half)
+        path.close()
+        c.drawPath(path, head)
+    }
+
+    private fun headDown(c: Canvas, ax: Float, ay: Float, s: Float, len: Float = HEAD_LEN, half: Float = HEAD_HALF) {
+        path.reset()
+        path.moveTo(ax, ay)
+        path.lineTo(ax - s * half, ay - s * len)
+        path.lineTo(ax + s * half, ay - s * len)
         path.close()
         c.drawPath(path, head)
     }
