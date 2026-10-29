@@ -118,22 +118,4 @@ public class RoadRepository {
                 MAX_FOLLOW_DISTANCE_M);
         return new LaneGuide(total[0], targets);
     }
-
-    /** 현재 위치에서 가장 가까운 차로가 속한 도로의 전체 차로 수 */
-    public int countLanes(double lat, double lng) {
-        String sql = """
-                WITH RECURSIVE lanes AS (
-                    SELECT id, laneno, r_linkid, l_linkid
-                    FROM a2_link
-                    WHERE id = (SELECT id FROM a2_link ORDER BY (geom <-> ST_Transform(
-                        ST_SetSRID(ST_MakePoint(?, ?), 4326), 5179)) LIMIT 1)
-                    UNION
-                    SELECT nxt.id, nxt.laneno, nxt.r_linkid, nxt.l_linkid
-                    FROM a2_link nxt
-                    JOIN lanes ON nxt.id = lanes.r_linkid OR nxt.id = lanes.l_linkid
-                )
-                SELECT COUNT(*) AS total_lanes FROM lanes
-                """;
-        return jdbcTemplate.queryForObject(sql, Integer.class, lng, lat);
-    }
 }

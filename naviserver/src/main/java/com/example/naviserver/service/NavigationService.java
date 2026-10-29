@@ -33,7 +33,6 @@ public class NavigationService {
     private final int placeholderCurrentLane;
 
     private final AtomicInteger routeIdCounter = new AtomicInteger(0);
-    private int currentRouteId = 0;
     private List<Point> routePoints = List.of();
     private List<ManeuverInfo> maneuvers = List.of();
     private List<Integer> maneuverPathIdx = List.of();
@@ -57,8 +56,7 @@ public class NavigationService {
         this.laneGuideCache.clear();
         this.nextManeuverIdx = 0;
         this.destination = destination;
-        this.currentRouteId = routeIdCounter.incrementAndGet();
-        return currentRouteId;
+        return routeIdCounter.incrementAndGet();
     }
 
     /**
