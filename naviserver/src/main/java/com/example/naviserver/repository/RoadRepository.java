@@ -84,43 +84,51 @@ public class RoadRepository {
                      directed := true) d
               WHERE d.node = d.end_vid AND d.agg_cost <= ?
             ),
-            -- 차로별 실제 진행 방향: 각 차로에서 차선 변경 없이 따라가 교차로 링크(linktype '1')를 찾는다
-            -- entry_id = 교차로에 들어가기 직전 링크, link_id = 지금 지나는 링크
+            -- ---- 차로별 실제 진행 방향 ----
+            -- 주변 링크의 시작/끝 방향(라디안, 북쪽 기준 시계 방향)
+            lh AS (
+              SELECT l.id, l.linktype,
+                     ST_Azimuth(ST_StartPoint(x.ln), ST_LineInterpolatePoint(x.ln, least(1, 15 / ST_Length(x.ln)))) AS az_start,
+                     ST_Azimuth(ST_LineInterpolatePoint(x.ln, greatest(0, 1 - 15 / ST_Length(x.ln))), ST_EndPoint(x.ln)) AS az_end
+              FROM a2_link l, p_a, LATERAL (SELECT ST_GeometryN(ST_LineMerge(ST_Force2D(l.geom)), 1) AS ln) x
+              WHERE ST_DWithin(l.geom, p_a.g, 300) AND ST_Length(x.ln) > 0
+            ),
+            -- 각 차로에서 차선 변경 없이 갈 수 있는 길을 모두 따라간다. 멈추는 곳(done):
+            --   1) 교차로 링크(linktype '1')를 지나 일반 링크로 빠져나온 곳
+            --   2) 교차로를 안 거치고 40도 넘게 꺾인 곳 (도류화 우회전처럼 교차로 앞에서 갈라지는 길)
             walk AS (
-              SELECT o.pos, e.target AS node, o.id::varchar AS entry_id, o.id::varchar AS link_id,
+              SELECT o.pos, e.target AS node, h.az_end AS ref, o.id::varchar AS link_id,
                      false AS in_x, false AS done, 0::numeric AS dist, 0 AS depth
-              FROM ordered_a o JOIN route_edge e ON e.link_id = o.id
+              FROM ordered_a o JOIN route_edge e ON e.link_id = o.id JOIN lh h ON h.id = o.id
               UNION ALL
-              SELECT w.pos, e.target,
-                     CASE WHEN l.linktype = '1' OR w.in_x THEN w.entry_id ELSE l.id END,
-                     l.id, l.linktype = '1', w.in_x AND l.linktype <> '1',
+              SELECT w.pos, e.target, w.ref, h.id,
+                     w.in_x OR h.linktype = '1',
+                     h.linktype <> '1' AND (w.in_x OR abs(degrees(mod((h.az_end - w.ref + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric)) > 40),
                      w.dist + e.cost, w.depth + 1
               FROM walk w
               JOIN route_edge e ON e.source = w.node AND e.link_id <> 'LC'
-              JOIN a2_link l ON l.id = e.link_id
+              JOIN lh h ON h.id = e.link_id
               WHERE NOT w.done AND w.depth < 8 AND w.dist < 150
             ),
-            -- 교차로 안 마지막 링크(다음에 교차로 링크가 더 없는 것)의 끝 방향을, 진입 링크 끝 방향과 비교한 회전각(도, 시계 방향 +)
+            -- 더 따라가지 않는 끝 지점들의 회전각(도, 시계 방향 +).
+            -- 교차로를 빠져나온 링크는 시작 방향, 나머지(도류화로 꺾인 링크, 지도 끝에서 끊긴 링크 등)는 끝 방향을 본다
             exits AS (
               SELECT DISTINCT w.pos,
-                     degrees(mod((ST_Azimuth(ST_LineInterpolatePoint(xo.ln, greatest(0, 1 - 15 / ST_Length(xo.ln))), ST_EndPoint(xo.ln))
-                                  - ST_Azimuth(ST_LineInterpolatePoint(xi.ln, greatest(0, 1 - 15 / ST_Length(xi.ln))), ST_EndPoint(xi.ln))
-                                  + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric) AS deg
-              FROM walk w
-              JOIN a2_link li ON li.id = w.entry_id
-              JOIN a2_link lo ON lo.id = w.link_id,
-                   LATERAL (SELECT ST_GeometryN(ST_LineMerge(ST_Force2D(li.geom)), 1) AS ln) xi,
-                   LATERAL (SELECT ST_GeometryN(ST_LineMerge(ST_Force2D(lo.geom)), 1) AS ln) xo
-              WHERE w.in_x
-                AND NOT EXISTS (SELECT 1 FROM route_edge e2 JOIN a2_link l2 ON l2.id = e2.link_id
-                                WHERE e2.source = w.node AND l2.linktype = '1')
+                     degrees(mod(((CASE WHEN w.in_x AND h.linktype <> '1' THEN h.az_start ELSE h.az_end END) - w.ref + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric) AS deg
+              FROM walk w JOIN lh h ON h.id = w.link_id
+              WHERE w.done OR w.depth >= 8 OR w.dist >= 150
+                 OR NOT EXISTS (SELECT 1 FROM route_edge e2 JOIN lh h2 ON h2.id = e2.link_id
+                                WHERE e2.source = w.node AND e2.link_id <> 'LC')
             ),
-            -- 직진 = 회전각이 가장 작은 출구(60도 안쪽일 때만). 도로가 휘어 있어도 그 도로를 따라가는 쪽이 직진이다
+            -- 직진 = 회전각이 가장 작은 끝 지점(60도 안쪽일 때만). 도로가 휘어 있어도 그 도로를 따라가는 쪽이 직진이다
             straight AS (SELECT deg FROM exits WHERE abs(deg) < 60 ORDER BY abs(deg) LIMIT 1),
+            -- 한 차로에서 갈라지는 길이 여러 개면 직진에 가장 가까운 길만 직진이고, 나머지는 꺾인 쪽으로 본다
             turns AS (
               SELECT DISTINCT e.pos,
                      CASE WHEN abs(e.deg) > 150 THEN 'UTURN'
-                          WHEN abs(e.deg - s.deg) <= 30 THEN 'STRAIGHT'
+                          WHEN abs(e.deg - s.deg) <= 30
+                               AND abs(e.deg - s.deg) <= (SELECT min(abs(e2.deg - s.deg)) FROM exits e2 WHERE e2.pos = e.pos) + 5
+                            THEN 'STRAIGHT'
                           WHEN e.deg < coalesce(s.deg, 0) THEN 'LEFT'
                           ELSE 'RIGHT' END AS turn
               FROM exits e LEFT JOIN straight s ON true

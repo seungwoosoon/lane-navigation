@@ -24,7 +24,8 @@ public class NavigationService {
     private static final double PASSED_DISTANCE_M = 20.0;    // 이 거리 안으로 들어오면 분기점 통과로 본다
     private static final double ARRIVED_DISTANCE_M = 30.0;   // 목적지 도착 판정 거리
 
-    // 분기점 앞/뒤 단면을 잡을 경로상 거리(m). 앞쪽은 교차로 안에 걸리면 조금씩 더 멀리 잡아 다시 시도한다.
+    // 분기점 앞 단면을 잡을 경로상 거리(m). 여러 곳에서 재 보고 차로가 가장 많은 단면을 쓴다.
+    // (교차로 바로 앞은 도류화 우회전 차로가 이미 갈라져 나가 차로 수가 줄어 있을 수 있다)
     private static final double[] BEFORE_DISTANCES_M = {30, 50, 70};
     private static final double AFTER_DISTANCE_M = 40;
     private static final double HEADING_REF_M = 10;          // 진행 방향 계산용 기준점 간격
@@ -114,10 +115,7 @@ public class NavigationService {
                 Point before = pointAlong(pathIdx, beforeM, -1);
                 Point beforePrev = pointAlong(pathIdx, beforeM + HEADING_REF_M, -1);
                 LaneGuide g = roadRepository.findLaneGuide(beforePrev, before, afterPrev, after);
-                if (g.totalLanes() > 0 && !g.targetLanes().isEmpty()) {
-                    return g;
-                }
-                if (best.totalLanes() == 0) {
+                if (isBetter(g, best)) {
                     best = g;
                 }
             }
@@ -125,6 +123,16 @@ public class NavigationService {
             log.warn("목표 차로 조회 실패 (maneuver {}): {}", maneuverIdx, e.getMessage());
         }
         return best;
+    }
+
+    /** 목표 차로를 찾은 단면이 우선, 그다음은 차로가 더 많은 단면 (같으면 분기점에 가까운 앞의 것) */
+    private static boolean isBetter(LaneGuide g, LaneGuide best) {
+        boolean gHasTarget = !g.targetLanes().isEmpty();
+        boolean bestHasTarget = !best.targetLanes().isEmpty();
+        if (gHasTarget != bestHasTarget) {
+            return gHasTarget;
+        }
+        return g.totalLanes() > best.totalLanes();
     }
 
     /** 경로에서 pathIdx 지점부터 distance(m)만큼 앞(+1) 또는 뒤(-1)로 간 지점 */
