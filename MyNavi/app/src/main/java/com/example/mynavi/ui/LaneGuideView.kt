@@ -14,8 +14,8 @@ import kotlin.math.min
 
 /**
  * 차로 안내 그림.
- * - 목표 차로: 파란 바탕 + 회전 방향 화살표
- * - 나머지 차로: 회색 직진 화살표
+ * - 차로마다 실제로 갈 수 있는 방향 화살표 (서버 laneDirections, 없으면 목표 차로는 회전 / 나머지는 직진)
+ * - 목표 차로: 파란 바탕 + 파란 화살표, 나머지: 회색 화살표
  * - 현재 차로(알 때만): 아래쪽에 자동차
  */
 class LaneGuideView @JvmOverloads constructor(
@@ -27,6 +27,7 @@ class LaneGuideView @JvmOverloads constructor(
     private var targetLanes: Set<Int> = emptySet()
     private var currentLane: Int? = null
     private var maneuver: String? = null
+    private var laneDirections: List<List<String>> = emptyList()
 
     private val dp = resources.displayMetrics.density
 
@@ -65,12 +66,19 @@ class LaneGuideView @JvmOverloads constructor(
     private val tmpRect = RectF()
     private val clipPath = Path()
 
-    fun setLanes(total: Int, targets: List<Int>, current: Int?, maneuver: String?) {
+    fun setLanes(
+        total: Int,
+        targets: List<Int>,
+        current: Int?,
+        maneuver: String?,
+        directions: List<List<String>>? = null
+    ) {
         val heightChanged = (currentLane == null) != (current == null)
         totalLanes = total
         targetLanes = targets.toSet()
         currentLane = current
         this.maneuver = maneuver
+        laneDirections = directions ?: emptyList()
         if (heightChanged) requestLayout()
         invalidate()
     }
@@ -122,12 +130,16 @@ class LaneGuideView @JvmOverloads constructor(
         for (i in 1..n) {
             val cx = left + (i - 0.5f) * laneW
             val isTarget = i in targetLanes
-            ArrowPainter.draw(
+            val dirs = laneDirections.getOrNull(i - 1).orEmpty()
+                .ifEmpty { listOf(if (isTarget) maneuver ?: "STRAIGHT" else "STRAIGHT") }
+            // 여러 방향 화살표는 가지가 가늘어서 조금 크게 그린다
+            val size = if (dirs.size > 1) arrowSize * 1.2f else arrowSize
+            ArrowPainter.drawLane(
                 canvas,
-                if (isTarget) maneuver else "STRAIGHT",
-                cx - arrowSize / 2f,
+                dirs,
+                cx - size / 2f,
                 arrowTop,
-                arrowSize,
+                size,
                 if (isTarget) arrowOnColor else arrowOffColor
             )
         }

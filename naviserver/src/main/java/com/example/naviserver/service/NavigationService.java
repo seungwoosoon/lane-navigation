@@ -64,7 +64,7 @@ public class NavigationService {
      */
     public synchronized NavResponse processLocation(double lat, double lng, Integer currentLane) {
         if (destination != null && distanceMeters(lat, lng, destination.lat(), destination.lng()) < ARRIVED_DISTANCE_M) {
-            return new NavResponse(false, null, null, null, null, null, "목적지에 도착했습니다.", true);
+            return new NavResponse(false, null, null, null, null, null, null, "목적지에 도착했습니다.", true);
         }
 
         while (nextManeuverIdx < maneuvers.size()) {
@@ -77,7 +77,7 @@ public class NavigationService {
         }
 
         if (nextManeuverIdx >= maneuvers.size()) {
-            return new NavResponse(false, null, null, null, null, null, null, false);
+            return new NavResponse(false, null, null, null, null, null, null, null, false);
         }
 
         ManeuverInfo next = maneuvers.get(nextManeuverIdx);
@@ -85,7 +85,7 @@ public class NavigationService {
         int distInt = (int) dist;
 
         if (dist > TRIGGER_DISTANCE_M) {
-            return new NavResponse(false, null, null, null, null, null, null, false);
+            return new NavResponse(false, null, null, null, null, null, null, null, false);
         }
 
         // 정밀도로지도에서 전체 차로 수와 목표 차로 조회 (분기점마다 한 번만 계산)
@@ -93,13 +93,13 @@ public class NavigationService {
         if (lanes.totalLanes() == 0) {
             // 정밀지도 범위 밖이거나 차로를 찾지 못한 경우: 회전 안내만 한다
             String message = distInt + "m 앞 " + maneuverKor(next.type()) + "입니다.";
-            return new NavResponse(true, next.type(), distInt, null, null, List.of(), message, false);
+            return new NavResponse(true, next.type(), distInt, null, null, List.of(), List.of(), message, false);
         }
 
         int total = lanes.totalLanes();
         int current = clamp(currentLane != null ? currentLane : placeholderCurrentLane, 1, total);
         String message = buildMessage(distInt, next.type(), current, lanes.targetLanes());
-        return new NavResponse(true, next.type(), distInt, total, current, lanes.targetLanes(), message, false);
+        return new NavResponse(true, next.type(), distInt, total, current, lanes.targetLanes(), lanes.laneDirections(), message, false);
     }
 
     // ------------------------------------------------------------------ 목표 차로 계산
@@ -108,7 +108,7 @@ public class NavigationService {
         int pathIdx = maneuverPathIdx.get(maneuverIdx);
         Point after = pointAlong(pathIdx, AFTER_DISTANCE_M, +1);
         Point afterPrev = pointAlong(pathIdx, AFTER_DISTANCE_M - HEADING_REF_M, +1);
-        LaneGuide best = new LaneGuide(0, List.of());
+        LaneGuide best = LaneGuide.NONE;
         try {
             for (double beforeM : BEFORE_DISTANCES_M) {
                 Point before = pointAlong(pathIdx, beforeM, -1);
