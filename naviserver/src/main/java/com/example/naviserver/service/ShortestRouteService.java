@@ -4,18 +4,13 @@ import com.example.naviserver.dto.Point;
 import com.example.naviserver.dto.RouteRequest;
 import com.example.naviserver.dto.RouteResponse;
 import com.example.naviserver.repository.RouteRepository;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import javax.sql.DataSource;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
-@Primary
-@ConditionalOnBean(DataSource.class)
 public class ShortestRouteService implements RouteService {
 
     private static final String SQL = """
