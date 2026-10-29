@@ -76,8 +76,8 @@ class LaneGuideView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // 자동차를 그릴 때만 아래 공간을 더 쓴다
-        val desired = ((if (currentLane != null) 120 else 88) * dp).toInt()
+        // 자동차를 그릴 때만 아래 공간을 더 쓴다: 자동차가 있으면 95dp, 없으면 60dp
+        val desired = ((if (currentLane != null) 95 else 60) * dp).toInt()
         setMeasuredDimension(
             MeasureSpec.getSize(widthMeasureSpec),
             resolveSize(desired, heightMeasureSpec)
@@ -89,10 +89,10 @@ class LaneGuideView @JvmOverloads constructor(
         val n = totalLanes
         if (n <= 0) return
 
-        val laneW = min(width.toFloat() / n, 68 * dp)
+        val laneW = min(width.toFloat() / n, 72 * dp)
         val left = (width - laneW * n) / 2f
         val bottom = height.toFloat()
-        val radius = 16 * dp
+        val radius = 14 * dp
         roadRect.set(left, 0f, left + laneW * n, bottom)
 
         // 도로 바탕
@@ -113,12 +113,12 @@ class LaneGuideView @JvmOverloads constructor(
         // 차선 (점선)
         for (i in 1 until n) {
             val x = left + i * laneW
-            canvas.drawLine(x, 10 * dp, x, bottom - 10 * dp, dividerPaint)
+            canvas.drawLine(x, 8 * dp, x, bottom - 8 * dp, dividerPaint)
         }
 
         // 차로별 화살표
-        val arrowSize = min(laneW * 0.62f, 46 * dp)
-        val arrowTop = if (currentLane != null) 14 * dp else (height - arrowSize) / 2f
+        val arrowSize = min(laneW * 0.5f, 35 * dp)
+        val arrowTop = if (currentLane != null) 10 * dp else (height - arrowSize) / 2f
         for (i in 1..n) {
             val cx = left + (i - 0.5f) * laneW
             val isTarget = i in targetLanes
@@ -135,9 +135,9 @@ class LaneGuideView @JvmOverloads constructor(
         // 현재 차로의 자동차
         val cur = currentLane
         if (cur != null && cur in 1..n) {
-            val carW = min(laneW * 0.40f, 24 * dp)
+            val carW = min(laneW * 0.30f, 20 * dp)
             val carH = carW * 1.75f
-            drawCar(canvas, left + (cur - 0.5f) * laneW, bottom - 10 * dp - carH, carW, carH)
+            drawCar(canvas, left + (cur - 0.5f) * laneW, bottom - 8 * dp - carH, carW, carH)
         }
     }
 

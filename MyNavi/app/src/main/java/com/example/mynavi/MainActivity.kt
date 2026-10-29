@@ -85,10 +85,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var turnIcon: TurnIconView
     private lateinit var tvDistance: TextView
     private lateinit var tvManeuver: TextView
-    private lateinit var laneBody: LinearLayout
+    private lateinit var laneBody: View
     private lateinit var laneView: LaneGuideView
-    private lateinit var tvLaneMove: TextView
-    private lateinit var tvGuidance: TextView
 
     private lateinit var fused: FusedLocationProviderClient
     private lateinit var kakaoMap: KakaoMap
@@ -171,8 +169,6 @@ class MainActivity : AppCompatActivity() {
         tvManeuver = findViewById(R.id.tv_maneuver)
         laneBody = findViewById(R.id.lane_body)
         laneView = findViewById(R.id.lane_view)
-        tvLaneMove = findViewById(R.id.tv_lane_move)
-        tvGuidance = findViewById(R.id.tv_guidance)
         lanePanel.clipToOutline = true   // 파란 머리 부분도 카드의 둥근 모서리를 따르도록
 
         applySystemBarInsets()
@@ -412,7 +408,7 @@ class MainActivity : AppCompatActivity() {
             "UTURN" -> "유턴"
             else -> nav.maneuver ?: ""
         }
-        val total = nav.totalLanes ?: 3
+        val total = nav.totalLanes
         val targets = nav.targetLanes ?: emptyList()
         val current = nav.currentLane
 
@@ -420,17 +416,18 @@ class MainActivity : AppCompatActivity() {
         turnHeader.setBackgroundResource(R.drawable.bg_turn_header)
         turnIcon.type = nav.maneuver
         tvDistance.text = formatDistance(nav.distanceToBranch ?: 0)
-        tvManeuver.text = "앞에서 $maneuverKor"
 
-        laneBody.visibility = View.VISIBLE
-        laneView.setLanes(total, targets, current, nav.maneuver)
-
-        // 현재 차로를 알 때만 "몇 차로 이동" 표시 (AI 연동 전에는 숨김)
+        // 두 번째 줄: "좌회전 · 왼쪽으로 1차로 이동" (현재 차로를 알 때만 이동 안내를 붙임)
         val move = laneMoveText(current, targets)
-        tvLaneMove.text = move
-        tvLaneMove.visibility = if (move != null) View.VISIBLE else View.GONE
+        tvManeuver.text = if (move != null) "$maneuverKor · $move" else maneuverKor
 
-        tvGuidance.text = nav.message
+        // 정밀지도 범위 밖이라 서버가 차로 수를 모르면 차로 그림은 숨기고 회전 안내만 보여준다
+        if (total != null && total > 0) {
+            laneView.setLanes(total, targets, current, nav.maneuver)
+            laneBody.visibility = View.VISIBLE
+        } else {
+            laneBody.visibility = View.GONE
+        }
         lanePanel.visibility = View.VISIBLE
     }
 
