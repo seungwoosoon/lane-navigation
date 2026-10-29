@@ -14,16 +14,25 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Base64
 import android.util.Log
-import android.graphics.drawable.GradientDrawable
-import android.view.Gravity
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.RelativeSizeSpan
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
+import com.example.mynavi.ui.LaneGuideView
+import com.example.mynavi.ui.TurnIconView
 import com.example.mynavi.network.ApiClient
 import com.example.mynavi.network.LocationUpdate
 import com.example.mynavi.network.NavResponse
@@ -41,6 +50,7 @@ import com.kakao.vectormap.KakaoMapReadyCallback
 import com.kakao.vectormap.KakaoMapSdk
 import com.kakao.vectormap.LatLng
 import com.kakao.vectormap.MapAuthException
+import com.kakao.vectormap.MapGravity
 import com.kakao.vectormap.MapLifeCycleCallback
 import com.kakao.vectormap.MapView
 import com.kakao.vectormap.camera.CameraUpdateFactory
@@ -65,9 +75,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etDestination: EditText
     private lateinit var btnRoute: Button
     private lateinit var btnStop: Button
+    private lateinit var topOverlay: LinearLayout
+    private lateinit var bottomSheet: LinearLayout
+    private lateinit var inputGroup: LinearLayout
+    private lateinit var navGroup: LinearLayout
+    private lateinit var tvNavDest: TextView
     private lateinit var lanePanel: LinearLayout
+    private lateinit var turnHeader: LinearLayout
+    private lateinit var turnIcon: TurnIconView
+    private lateinit var tvDistance: TextView
     private lateinit var tvManeuver: TextView
-    private lateinit var laneRow: LinearLayout
+    private lateinit var laneBody: LinearLayout
+    private lateinit var laneView: LaneGuideView
+    private lateinit var tvLaneMove: TextView
     private lateinit var tvGuidance: TextView
 
     private lateinit var fused: FusedLocationProviderClient
@@ -80,6 +100,7 @@ class MainActivity : AppCompatActivity() {
     private var currentRouteId = 0
     private var lastUserInteractionTime = 0L
     private val AUTO_CENTER_DELAY_MS = 5000L
+    private val hideArrivalPanel = Runnable { lanePanel.visibility = View.GONE }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -96,8 +117,8 @@ class MainActivity : AppCompatActivity() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
             currentLoc = loc
-            info.text = "속도 ${String.format("%.1f", loc.speed * 3.6)} km/h  " +
-                    "정확도 ${String.format("%.0f", loc.accuracy)}m"
+            info.text = "${String.format("%.1f", loc.speed * 3.6)} km/h  ·  " +
+                    "GPS ±${String.format("%.0f", loc.accuracy)}m"
 
             val latLng = LatLng.from(loc.latitude, loc.longitude)
             val now = System.currentTimeMillis()
@@ -122,6 +143,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 지도 위로 화면을 꽉 채우고, 상태바·내비게이션바 아이콘은 어둡게 (밝은 지도 위)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        )
         KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_KEY)
         setContentView(R.layout.activity_main)
 
@@ -132,13 +158,36 @@ class MainActivity : AppCompatActivity() {
         btnStop = findViewById(R.id.btn_stop)
         fused = LocationServices.getFusedLocationProviderClient(this)
 
+        topOverlay = findViewById(R.id.top_overlay)
+        bottomSheet = findViewById(R.id.bottom_sheet)
+        inputGroup = findViewById(R.id.input_group)
+        navGroup = findViewById(R.id.nav_group)
+        tvNavDest = findViewById(R.id.tv_nav_dest)
+
         lanePanel = findViewById(R.id.lane_panel)
+        turnHeader = findViewById(R.id.turn_header)
+        turnIcon = findViewById(R.id.turn_icon)
+        tvDistance = findViewById(R.id.tv_distance)
         tvManeuver = findViewById(R.id.tv_maneuver)
-        laneRow = findViewById(R.id.lane_row)
+        laneBody = findViewById(R.id.lane_body)
+        laneView = findViewById(R.id.lane_view)
+        tvLaneMove = findViewById(R.id.tv_lane_move)
         tvGuidance = findViewById(R.id.tv_guidance)
+        lanePanel.clipToOutline = true   // 파란 머리 부분도 카드의 둥근 모서리를 따르도록
+
+        applySystemBarInsets()
+        bottomSheet.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> placeMapLogo() }
 
         btnRoute.setOnClickListener { requestRoute() }
         btnStop.setOnClickListener { stopNavigation() }
+        etDestination.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_GO) {
+                requestRoute()
+                true
+            } else {
+                false
+            }
+        }
 
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -160,8 +209,9 @@ class MainActivity : AppCompatActivity() {
             },
             object : KakaoMapReadyCallback() {
                 override fun onMapReady(map: KakaoMap) {
-                    info.text = "map ready"
+                    info.text = "지도 준비 완료"
                     kakaoMap = map
+                    placeMapLogo()
                     permissionLauncher.launch(
                         arrayOf(
                             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -220,6 +270,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         info.text = "경로 요청 중..."
+        btnRoute.isEnabled = false
+        hideKeyboard()
         val request = RouteRequest(
             start = Point(loc.latitude, loc.longitude),
             end = Point(destLat, destLng)
@@ -232,14 +284,16 @@ class MainActivity : AppCompatActivity() {
                     currentRouteId = body.routeId
                     drawRoute(body.path)
                     isNavigating = true
-                    btnRoute.isEnabled = false
-                    btnStop.isEnabled = true
-                    info.text = "내비게이션 시작 (경유점 ${body.path.size}개)"
+                    tvNavDest.text = "목적지 ${String.format("%.4f", destLat)}, ${String.format("%.4f", destLng)}"
+                    setNavigatingUi(true)
+                    info.text = "안내 시작 (경유점 ${body.path.size}개)"
                 } else {
+                    btnRoute.isEnabled = true
                     info.text = "서버 응답 없음 (${response.code()})"
                 }
             }
             override fun onFailure(call: Call<RouteResponse>, t: Throwable) {
+                btnRoute.isEnabled = true
                 info.text = "요청 실패: ${t.message}"
             }
         })
@@ -249,10 +303,61 @@ class MainActivity : AppCompatActivity() {
         isNavigating = false
         lastSpokenDistance = Int.MAX_VALUE
         currentRouteId = 0
-        btnRoute.isEnabled = true
-        btnStop.isEnabled = false
-        info.text = "내비게이션 중지"
+        setNavigatingUi(false)
+        lanePanel.removeCallbacks(hideArrivalPanel)
+        lanePanel.visibility = View.GONE
+        info.text = "안내 종료"
         kakaoMap.routeLineManager?.layer?.removeAll()
+    }
+
+    /** 하단 시트를 '목적지 입력' 또는 '안내 중' 화면으로 바꾼다. */
+    private fun setNavigatingUi(navigating: Boolean) {
+        inputGroup.visibility = if (navigating) View.GONE else View.VISIBLE
+        navGroup.visibility = if (navigating) View.VISIBLE else View.GONE
+        btnRoute.isEnabled = !navigating
+        btnStop.isEnabled = navigating
+        etDestination.clearFocus()   // 입력 화면으로 돌아와도 입력칸이 선택된 채로 남지 않게
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(InputMethodManager::class.java)
+        imm?.hideSoftInputFromWindow(etDestination.windowToken, 0)
+        etDestination.clearFocus()
+    }
+
+    /**
+     * 상태바 높이만큼 상단 카드를, 내비게이션바(키보드가 열리면 키보드) 높이만큼
+     * 하단 시트를 안쪽으로 민다.
+     */
+    private fun applySystemBarInsets() {
+        val topBase = topOverlay.paddingTop
+        val bottomBase = bottomSheet.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { _, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            topOverlay.setPadding(
+                topOverlay.paddingLeft, topBase + bars.top,
+                topOverlay.paddingRight, topOverlay.paddingBottom
+            )
+            bottomSheet.setPadding(
+                bottomSheet.paddingLeft, bottomSheet.paddingTop,
+                bottomSheet.paddingRight, bottomBase + maxOf(bars.bottom, ime.bottom)
+            )
+            insets
+        }
+    }
+
+    /** 카카오 로고가 하단 시트에 가리지 않도록 시트 바로 위로 옮긴다. */
+    private fun placeMapLogo() {
+        if (!::kakaoMap.isInitialized) return
+        val dp = resources.displayMetrics.density
+        kakaoMap.logo?.setPosition(
+            MapGravity.BOTTOM or MapGravity.RIGHT,
+            12 * dp,
+            bottomSheet.height + 8 * dp
+        )
     }
 
     private fun sendLocationToServer(loc: Location) {
@@ -272,21 +377,11 @@ class MainActivity : AppCompatActivity() {
     private fun handleNavResponse(nav: NavResponse) {
         if (nav.arrived) {
             isNavigating = false
-            btnRoute.isEnabled = true
-            btnStop.isEnabled = false
+            setNavigatingUi(false)
             kakaoMap.routeLineManager?.layer?.removeAll()
             tts.speak("목적지에 도착했습니다.", TextToSpeech.QUEUE_FLUSH, null, null)
             lastSpokenDistance = Int.MAX_VALUE
-
-            tvManeuver.text = "목적지 도착"
-            tvGuidance.text = "목적지에 도착했습니다."
-            laneRow.removeAllViews()
-            laneRow.visibility = View.GONE
-            lanePanel.visibility = View.VISIBLE
-            lanePanel.postDelayed({
-                lanePanel.visibility = View.GONE
-                laneRow.visibility = View.VISIBLE
-            }, 3000)
+            showArrivalPanel()
             return
         }
 
@@ -317,59 +412,64 @@ class MainActivity : AppCompatActivity() {
             "UTURN" -> "유턴"
             else -> nav.maneuver ?: ""
         }
-        tvManeuver.text = "${nav.distanceToBranch}m 앞 $maneuverKor"
-        tvGuidance.text = nav.message
-
         val total = nav.totalLanes ?: 3
         val targets = nav.targetLanes ?: emptyList()
         val current = nav.currentLane
 
-        laneRow.removeAllViews()
-        val dp = resources.displayMetrics.density
-        val cellSize = (56 * dp).toInt()
-        val margin = (4 * dp).toInt()
+        lanePanel.removeCallbacks(hideArrivalPanel)
+        turnHeader.setBackgroundResource(R.drawable.bg_turn_header)
+        turnIcon.type = nav.maneuver
+        tvDistance.text = formatDistance(nav.distanceToBranch ?: 0)
+        tvManeuver.text = "앞에서 $maneuverKor"
 
-        for (i in 1..total) {
-            val cell = TextView(this)
-            val params = LinearLayout.LayoutParams(cellSize, cellSize).apply {
-                setMargins(margin, 0, margin, 0)
-            }
-            cell.layoutParams = params
-            cell.gravity = Gravity.CENTER
-            cell.textSize = 22f
+        laneBody.visibility = View.VISIBLE
+        laneView.setLanes(total, targets, current, nav.maneuver)
 
-            val bg = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE }
+        // 현재 차로를 알 때만 "몇 차로 이동" 표시 (AI 연동 전에는 숨김)
+        val move = laneMoveText(current, targets)
+        tvLaneMove.text = move
+        tvLaneMove.visibility = if (move != null) View.VISIBLE else View.GONE
 
-            when {
-                current == i -> {
-                    bg.setColor(Color.WHITE)
-                    bg.setStroke((2 * dp).toInt(), Color.WHITE)
-                    cell.text = "🚗"
-                }
-                targets.contains(i) -> {
-                    bg.setColor(Color.rgb(255, 200, 0))
-                    bg.setStroke((2 * dp).toInt(), Color.WHITE)
-                    cell.text = "●"
-                    cell.setTextColor(Color.rgb(26, 58, 107))
-                }
-                else -> {
-                    bg.setColor(Color.TRANSPARENT)
-                    bg.setStroke((2 * dp).toInt(), Color.WHITE)
-                    cell.text = ""
-                    cell.setTextColor(Color.WHITE)
-                }
-            }
-            cell.background = bg
-            laneRow.addView(cell)
-        }
-
+        tvGuidance.text = nav.message
         lanePanel.visibility = View.VISIBLE
+    }
+
+    private fun showArrivalPanel() {
+        turnHeader.setBackgroundResource(R.drawable.bg_arrive_header)
+        turnIcon.type = "ARRIVE"
+        tvDistance.text = "도착"
+        tvManeuver.text = "목적지에 도착했습니다"
+        laneBody.visibility = View.GONE
+        lanePanel.visibility = View.VISIBLE
+        lanePanel.removeCallbacks(hideArrivalPanel)
+        lanePanel.postDelayed(hideArrivalPanel, 3000)
+    }
+
+    /** 280 → "280m", 1250 → "1.3km" (단위 글자는 작게). */
+    private fun formatDistance(meters: Int): CharSequence {
+        val (num, unit) = if (meters >= 1000) {
+            String.format("%.1f", meters / 1000.0) to "km"
+        } else {
+            meters.toString() to "m"
+        }
+        return SpannableString(num + unit).apply {
+            setSpan(RelativeSizeSpan(0.6f), num.length, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+
+    /** 현재 차로에서 가장 가까운 목표 차로까지의 이동 안내. 현재 차로를 모르면 null. */
+    private fun laneMoveText(current: Int?, targets: List<Int>): String? {
+        if (current == null || targets.isEmpty()) return null
+        if (current in targets) return "현재 차로 유지"
+        val nearest = targets.minByOrNull { kotlin.math.abs(it - current) } ?: return null
+        val diff = nearest - current
+        return if (diff < 0) "왼쪽으로 ${-diff}차로 이동" else "오른쪽으로 ${diff}차로 이동"
     }
 
     private fun drawRoute(path: List<Point>) {
         val latLngs = path.map { LatLng.from(it.lat, it.lng) }
         val stylesSet = RouteLineStylesSet.from(
-            RouteLineStyles.from(RouteLineStyle.from(16f, Color.rgb(30, 110, 255)))
+            RouteLineStyles.from(RouteLineStyle.from(16f, getColor(R.color.navi_primary)))
         )
         val segment = RouteLineSegment.from(latLngs, stylesSet.getStyles(0))
         val options = RouteLineOptions.from(segment).setStylesSet(stylesSet)
@@ -390,7 +490,7 @@ class MainActivity : AppCompatActivity() {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.WHITE
         canvas.drawCircle(24f, 24f, 24f, paint)
-        paint.color = Color.rgb(30, 110, 255)
+        paint.color = getColor(R.color.navi_primary)
         canvas.drawCircle(24f, 24f, 17f, paint)
         return bmp
     }

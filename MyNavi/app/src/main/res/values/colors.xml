@@ -2,4 +2,27 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 앱 기본 색 -->
+    <color name="navi_primary">#2E6CF6</color>
+    <color name="navi_primary_light">#4D8DFF</color>
+    <color name="navi_primary_soft">#E8F0FF</color>
+    <color name="navi_success">#12B886</color>
+    <color name="navi_success_light">#38D39F</color>
+    <color name="navi_danger">#F04452</color>
+    <color name="navi_danger_soft">#FFEDEE</color>
+
+    <!-- 글자 -->
+    <color name="navi_text">#191F28</color>
+    <color name="navi_text_sub">#6B7684</color>
+    <color name="navi_hint">#A0A8B1</color>
+
+    <!-- 입력칸 -->
+    <color name="navi_field">#F2F4F6</color>
+
+    <!-- 차로 안내 그림 -->
+    <color name="lane_road">#F2F4F6</color>
+    <color name="lane_divider">#C9D0D8</color>
+    <color name="lane_arrow_off">#C4CAD1</color>
+    <color name="lane_car">#FF7A45</color>
 </resources>
