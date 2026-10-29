@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 회전 안내 머리 부분 (파란 그라데이션) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="0"
+        android:endColor="@color/navi_primary_light"
+        android:startColor="@color/navi_primary" />
+</shape>

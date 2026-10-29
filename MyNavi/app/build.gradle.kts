@@ -25,6 +25,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "KAKAO_NATIVE_KEY", "\"${localProps.getProperty("KAKAO_NATIVE_KEY", "")}\"")
+        // 서버 주소: 네트워크마다 달라서 local.properties의 API_BASE_URL로 지정 (없으면 기본값)
+        buildConfigField("String", "API_BASE_URL", "\"${localProps.getProperty("API_BASE_URL", "http://165.246.31.189:8080/")}\"")
     }
 
     buildFeatures {

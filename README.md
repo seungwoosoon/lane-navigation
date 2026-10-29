@@ -53,8 +53,14 @@ cd naviserver
 ### 앱 실행
 
 1. Android Studio에서 `MyNavi` 폴더를 엽니다
-2. `network/ApiClient.kt` 의 `BASE_URL` 을 서버 주소로 변경합니다
-3. 카카오맵 API 키를 설정하고 빌드합니다
+2. `MyNavi/local.properties` 에 서버 주소와 카카오맵 키를 적습니다 (git에 올라가지 않는 파일)
+
+   ```properties
+   API_BASE_URL=http://<서버 IP>:8080/
+   KAKAO_NATIVE_KEY=<카카오 네이티브 앱 키>
+   ```
+
+3. 빌드합니다. 폰은 서버와 같은 네트워크(예: 같은 핫스팟)에 연결되어 있어야 합니다
 
 ### 데이터베이스
 
