@@ -84,8 +84,9 @@ class LaneGuideView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // 자동차를 그릴 때만 아래 공간을 더 쓴다: 자동차가 있으면 95dp, 없으면 60dp
-        val desired = ((if (currentLane != null) 95 else 60) * dp).toInt()
+        // 자동차를 그릴 때만 아래 공간을 더 쓴다
+        val heightDp = if (currentLane != null) HEIGHT_WITH_CAR_DP else HEIGHT_DP
+        val desired = (heightDp * dp).toInt()
         setMeasuredDimension(
             MeasureSpec.getSize(widthMeasureSpec),
             resolveSize(desired, heightMeasureSpec)
@@ -126,14 +127,15 @@ class LaneGuideView @JvmOverloads constructor(
 
         // 차로별 화살표
         val arrowSize = min(laneW * 0.5f, 35 * dp)
-        val arrowTop = if (currentLane != null) 10 * dp else (height - arrowSize) / 2f
+        // 자동차가 있으면 화살표는 위쪽에 붙이고 자동차는 아래쪽에 붙여, 둘 사이 간격을 확보한다
+        val arrowTop = if (currentLane != null) ARROW_TOP_DP * dp else (height - arrowSize) / 2f
         for (i in 1..n) {
             val cx = left + (i - 0.5f) * laneW
             val isTarget = i in targetLanes
             val dirs = laneDirections.getOrNull(i - 1).orEmpty()
                 .ifEmpty { listOf(if (isTarget) maneuver ?: "STRAIGHT" else "STRAIGHT") }
             // 여러 방향 화살표는 가지가 가늘어서 조금 크게 그린다
-            val size = if (dirs.size > 1) arrowSize * 1.2f else arrowSize
+            val size = if (dirs.size > 1) arrowSize * MULTI_ARROW_SCALE else arrowSize
             ArrowPainter.drawLane(
                 canvas,
                 dirs,
@@ -149,8 +151,21 @@ class LaneGuideView @JvmOverloads constructor(
         if (cur != null && cur in 1..n) {
             val carW = min(laneW * 0.30f, 20 * dp)
             val carH = carW * 1.75f
-            drawCar(canvas, left + (cur - 0.5f) * laneW, bottom - 8 * dp - carH, carW, carH)
+            drawCar(canvas, left + (cur - 0.5f) * laneW, bottom - CAR_BOTTOM_MARGIN_DP * dp - carH, carW, carH)
         }
+    }
+
+    private companion object {
+        // 차로 그림 높이 (자동차 있음 / 없음)
+        const val HEIGHT_WITH_CAR_DP = 95f
+        const val HEIGHT_DP = 60f
+
+        // 자동차가 있을 때의 세로 배치. 여러 방향 화살표(1.2배)도 자동차와 7dp 이상 떨어지게 맞춘 값
+        const val ARROW_TOP_DP = 6f
+        const val CAR_BOTTOM_MARGIN_DP = 5f
+
+        // 여러 방향 화살표 확대 비율
+        const val MULTI_ARROW_SCALE = 1.2f
     }
 
     /** 위에서 내려다본 자동차 (앞이 위쪽). */
