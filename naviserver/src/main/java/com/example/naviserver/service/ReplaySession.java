@@ -31,7 +31,13 @@ public class ReplaySession {
     private final long recordingStartMs;
     private final List<ReplayTrack.ReplayPoint> points;
 
-    public ReplaySession(@Value("${navi.replay.session-dir:}") String sessionDir) {
+    /**
+     * @param fromSec 재생 시작 (녹화 시작부터 초). 0 이면 처음부터
+     * @param toSec   재생 끝 (녹화 시작부터 초). 0 이면 끝까지. 앱은 이 구간의 마지막 위치를 목적지로 쓴다
+     */
+    public ReplaySession(@Value("${navi.replay.session-dir:}") String sessionDir,
+                         @Value("${navi.replay.from-sec:0}") double fromSec,
+                         @Value("${navi.replay.to-sec:0}") double toSec) {
         String id = null;
         long start = -1;
         List<ReplayTrack.ReplayPoint> pts = List.of();
@@ -48,7 +54,13 @@ public class ReplaySession {
                     }
                 }
                 pts = readGps(dir.resolve(rec.path("gps_path").asText("gps.csv")));
-                log.info("주행 기록 재생 준비: session={}, GPS {}개, 녹화 시작 {}", id, pts.size(), start);
+                if (start >= 0 && (fromSec > 0 || toSec > 0)) {
+                    long fromMs = start + Math.round(fromSec * 1000);
+                    long toMs = toSec > 0 ? start + Math.round(toSec * 1000) : Long.MAX_VALUE;
+                    pts = pts.stream().filter(p -> p.timestampMs() >= fromMs && p.timestampMs() <= toMs).toList();
+                }
+                log.info("주행 기록 재생 준비: session={}, GPS {}개 ({}~{}초), 녹화 시작 {}", id, pts.size(),
+                        fromSec, toSec > 0 ? toSec : "끝", start);
             } catch (Exception e) {
                 log.warn("주행 기록을 읽지 못했습니다 ({}): {}", sessionDir, e.toString());
                 id = null;

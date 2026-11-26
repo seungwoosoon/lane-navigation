@@ -43,6 +43,12 @@ public class NavigationService {
     private int nextManeuverIdx = 0;
     private Point destination = null;
 
+    // AI가 마지막으로 알려준 차로. AI가 잠깐 모를 때(분석 구간 끝, 일시 오류) 가까운 거리 안에서는 이 값을 이어 쓴다
+    private static final double AI_HOLD_DISTANCE_M = 80.0;  // 차로를 바꾸려면 보통 수십 m를 달려야 한다
+    private Integer lastAiLane = null;
+    private int lastAiManeuverIdx = -1;
+    private Point lastAiPoint = null;
+
     public NavigationService(RoadRepository roadRepository, LaneAiClient laneAi, ReplaySession replay,
                              @Value("${navi.placeholder-current-lane:0}") int placeholderCurrentLane) {
         this.roadRepository = roadRepository;
@@ -61,6 +67,9 @@ public class NavigationService {
         this.laneGuideCache.clear();
         this.nextManeuverIdx = 0;
         this.destination = destination;
+        this.lastAiLane = null;
+        this.lastAiManeuverIdx = -1;
+        this.lastAiPoint = null;
         return routeIdCounter.incrementAndGet();
     }
 
@@ -110,6 +119,14 @@ public class NavigationService {
             source = "APP";
         } else {
             current = currentLaneFromAi(lanes, timestampMs);
+            if (current != null) {
+                lastAiLane = current;
+                lastAiManeuverIdx = nextManeuverIdx;
+                lastAiPoint = new Point(lat, lng);
+            } else if (lastAiLane != null && lastAiManeuverIdx == nextManeuverIdx
+                    && distanceMeters(lat, lng, lastAiPoint.lat(), lastAiPoint.lng()) < AI_HOLD_DISTANCE_M) {
+                current = lastAiLane;
+            }
             if (current != null) {
                 source = "AI";
             } else if (placeholderCurrentLane > 0) {

@@ -89,10 +89,14 @@ psql -U postgres -d lanenavi -f naviserver/sql/01_route_graph.sql
 AI 담당에게 받을 파일: 세션 폴더(`recording.json`, `gps.csv`)와 분석 결과(`unified_uturn_final.json` 등). 자세한 AI API는
 [유턴 재생 연동 안내](lane-ai/docs/server-replay-integration.md)를 봅니다.
 
+받은 세 파일(`recording.json`, `gps.csv`, `unified_uturn_final.json`)은 `lane-ai\data\drives\<세션 이름>\` 폴더에 둡니다
+(git에 올라가지 않는 폴더). 아래 예시는 11/24 유턴 주행 `drive_20261124_172325`입니다.
+
 1. **Lane AI 재생 API** (같은 노트북, 포트 8765)
 
    ```powershell
-   py lane-ai\scripts\serve_lane_replay.py --result <분석결과.json> --recording <세션폴더>\recording.json
+   cd C:\lane-navigation\lane-ai\data\drives\drive_20261124_172325
+   py C:\lane-navigation\lane-ai\scripts\serve_lane_replay.py --result unified_uturn_final.json --recording recording.json
    ```
 
 2. **서버**: IntelliJ 실행 설정의 환경변수에 아래를 추가하고 실행합니다.
@@ -100,16 +104,32 @@ AI 담당에게 받을 파일: 세션 폴더(`recording.json`, `gps.csv`)와 분
    | 환경변수 | 값 |
    |---|---|
    | `DB_PASSWORD`, `KAKAO_REST_KEY` | 기존과 같음 |
-   | `REPLAY_SESSION_DIR` | `recording.json`, `gps.csv`가 있는 세션 폴더 |
+   | `REPLAY_SESSION_DIR` | 세션 폴더, 예: `C:/lane-navigation/lane-ai/data/drives/drive_20261124_172325` |
+   | `REPLAY_FROM_SEC`, `REPLAY_TO_SEC` | 재생 구간(녹화 시작부터 초). 이 주행은 `250`, `400` |
    | `LANE_AI_URL` | 기본 `http://127.0.0.1:8765` (다르면 지정) |
+
+   재생 구간을 정하면 그 구간의 첫 위치가 출발지, 마지막 위치가 목적지가 됩니다. 이 주행 기록은 출발지로 되돌아오는 한 바퀴라
+   구간 없이 전체를 재생하면 목적지가 출발지 옆이 되어 경로에 유턴이 들어가지 않습니다. 250~400초는 유턴 약 500m 앞에서 출발해
+   유턴 후 반대 차로에서 끝납니다 (AI 분석 결과는 288~308초).
 
 3. **폰 없이 확인**: 서버가 받는 그대로 GPS를 보내고 안내를 출력합니다.
 
    ```powershell
-   py naviserver\tools\replay_client.py --speed 5
+   py naviserver\tools\replay_client.py
    ```
 
-   회전 지점 300m 안에서 `현재 2(AI) … 왼쪽으로 1차로 이동하세요` → `현재 1(AI) … 현재 차로를 유지하세요`처럼 바뀌면 연결 성공입니다.
+   이 주행이면 아래처럼 나옵니다 (초 = 녹화 시작부터). 이렇게 바뀌면 전체 연결 성공입니다.
+
+   ```
+   [  272.8s] 291m UTURN 차로 5 목표 [1] 현재 None(None) … | 291m 앞 유턴. 1차로로 가세요.
+   [  288.8s] 111m UTURN 차로 5 목표 [1] 현재 2(AI) … | 111m 앞 유턴. 현재 2차로, 왼쪽으로 1차로 이동하세요.
+   [  306.8s] 57m UTURN 차로 5 목표 [1] 현재 1(AI) … | 57m 앞 유턴. 현재 차로를 유지하세요.
+   [  312.8s] 안내 없음
+   [  395.8s] 도착
+   ```
+
+   AI는 지금 달리는 정밀지도 링크도 같이 주고, 서버는 그 링크가 이어지는 단면(유턴 포켓 포함 5차로)의 번호로 바꿉니다.
+   그래서 포켓이 생기기 전(288초, AI는 1차로)도 서버 기준으로는 2차로입니다. AI 분석이 끝난 뒤(308초~)에는 80m 안에서 마지막 차로를 이어 씁니다.
 
 4. **앱**: `MyNavi/local.properties`에 아래를 넣고 빌드합니다. 앱이 서버의 주행 기록을 받아 첫 위치에 차를 두고
    목적지 칸에 마지막 위치를 채웁니다. **안내 시작**을 누르면 기록대로 달리며 차로 안내가 나옵니다.
@@ -121,7 +141,7 @@ AI 담당에게 받을 파일: 세션 폴더(`recording.json`, `gps.csv`)와 분
 
    실제 주행으로 돌아갈 때는 `REPLAY_MODE=false`(또는 삭제)로 다시 빌드합니다.
 
-AI가 꺼져 있거나 그 회전 지점 자료가 없으면 서버는 현재 차로 없이 "1차로로 가세요"처럼 목표 차로만 안내합니다.
+카카오 경로가 다른 유턴 지점을 고르면 서버가 고른 회전 링크가 AI 자료(`A223AA160179`)와 달라 AI가 409를 돌려줍니다. 이때와 AI가 꺼져 있을 때 서버는 현재 차로 없이 "1차로로 가세요"처럼 목표 차로만 안내합니다.
 
 <br/>
 
