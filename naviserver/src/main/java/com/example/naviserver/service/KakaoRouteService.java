@@ -5,6 +5,8 @@ import com.example.naviserver.dto.RouteRequest;
 import com.example.naviserver.dto.RouteResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpEntity;
@@ -20,6 +22,8 @@ import java.util.List;
 @Service
 @Primary
 public class KakaoRouteService implements RouteService {
+
+    private static final Logger log = LoggerFactory.getLogger(KakaoRouteService.class);
 
     @Value("${kakao.rest.api.key}")
     private String kakaoApiKey;
@@ -81,6 +85,8 @@ public class KakaoRouteService implements RouteService {
             return new RouteResponse(routeId, routePoints);
 
         } catch (Exception e) {
+            // 키가 없거나 카카오 호출이 실패하면 직선 경로로 대신한다 (회전 안내 없음)
+            log.warn("카카오 길찾기 실패, 직선 경로로 대체: {}", e.toString());
             return fallbackRoute(req);
         }
     }

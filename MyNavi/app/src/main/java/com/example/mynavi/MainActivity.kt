@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.location.Location
 import android.os.Bundle
+import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Base64
@@ -37,6 +38,8 @@ import com.example.mynavi.network.ApiClient
 import com.example.mynavi.network.LocationUpdate
 import com.example.mynavi.network.NavResponse
 import com.example.mynavi.network.Point
+import com.example.mynavi.network.ReplayPoint
+import com.example.mynavi.network.ReplayTrack
 import com.example.mynavi.network.RouteRequest
 import com.example.mynavi.network.RouteResponse
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -100,6 +103,27 @@ class MainActivity : AppCompatActivity() {
     private val AUTO_CENTER_DELAY_MS = 5000L
     private val hideArrivalPanel = Runnable { lanePanel.visibility = View.GONE }
 
+    // 주행 기록 재생 모드 (local.properties 의 REPLAY_MODE=true): 폰 GPS 대신 서버의 주행 기록으로 달린다
+    private val replayHandler = Handler(Looper.getMainLooper())
+    private var replayPoints: List<ReplayPoint> = emptyList()
+    private var replayIndex = 0
+    private val replayStep = object : Runnable {
+        override fun run() {
+            if (replayIndex >= replayPoints.size) {
+                info.text = "재생 끝"
+                return
+            }
+            val p = replayPoints[replayIndex]
+            onNewLocation(toLocation(p))
+            replayIndex++
+            if (replayIndex < replayPoints.size) {
+                val gap = replayPoints[replayIndex].timestampMs - p.timestampMs
+                val speed = if (BuildConfig.REPLAY_SPEED > 0f) BuildConfig.REPLAY_SPEED else 1f
+                replayHandler.postDelayed(this, maxOf(50L, (gap / speed).toLong()))
+            }
+        }
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -114,28 +138,37 @@ class MainActivity : AppCompatActivity() {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
-            currentLoc = loc
-            info.text = "${String.format("%.1f", loc.speed * 3.6)} km/h  ·  " +
+            onNewLocation(loc)
+        }
+    }
+
+    /** 새 위치 하나를 처리한다: 지도 표시 + 안내 중이면 서버로 전송 (폰 GPS와 재생 모드가 같이 쓴다) */
+    private fun onNewLocation(loc: Location) {
+        currentLoc = loc
+        info.text = if (BuildConfig.REPLAY_MODE) {
+            "재생 ${replayIndex + 1}/${replayPoints.size}  ·  ${String.format("%.1f", loc.speed * 3.6)} km/h"
+        } else {
+            "${String.format("%.1f", loc.speed * 3.6)} km/h  ·  " +
                     "GPS ±${String.format("%.0f", loc.accuracy)}m"
+        }
 
-            val latLng = LatLng.from(loc.latitude, loc.longitude)
-            val now = System.currentTimeMillis()
-            if (now - lastUserInteractionTime > AUTO_CENTER_DELAY_MS) {
-                kakaoMap.moveCamera(CameraUpdateFactory.newCenterPosition(latLng))
-            }
+        val latLng = LatLng.from(loc.latitude, loc.longitude)
+        val now = System.currentTimeMillis()
+        if (now - lastUserInteractionTime > AUTO_CENTER_DELAY_MS) {
+            kakaoMap.moveCamera(CameraUpdateFactory.newCenterPosition(latLng))
+        }
 
-            if (myLabel == null) {
-                val styles = kakaoMap.labelManager!!
-                    .addLabelStyles(LabelStyles.from(LabelStyle.from(makeDot())))
-                myLabel = kakaoMap.labelManager!!.layer!!
-                    .addLabel(LabelOptions.from(latLng).setStyles(styles))
-            } else {
-                myLabel!!.moveTo(latLng)
-            }
+        if (myLabel == null) {
+            val styles = kakaoMap.labelManager!!
+                .addLabelStyles(LabelStyles.from(LabelStyle.from(makeDot())))
+            myLabel = kakaoMap.labelManager!!.layer!!
+                .addLabel(LabelOptions.from(latLng).setStyles(styles))
+        } else {
+            myLabel!!.moveTo(latLng)
+        }
 
-            if (isNavigating) {
-                sendLocationToServer(loc)
-            }
+        if (isNavigating) {
+            sendLocationToServer(loc)
         }
     }
 
@@ -208,6 +241,10 @@ class MainActivity : AppCompatActivity() {
                     info.text = "지도 준비 완료"
                     kakaoMap = map
                     placeMapLogo()
+                    if (BuildConfig.REPLAY_MODE) {
+                        loadReplay()
+                        return
+                    }
                     permissionLauncher.launch(
                         arrayOf(
                             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -235,8 +272,50 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        replayHandler.removeCallbacks(replayStep)
         tts.shutdown()
         super.onDestroy()
+    }
+
+    /** 재생 모드: 서버에서 주행 기록을 받아 첫 위치에 차를 두고, 목적지 칸에 기록의 마지막 위치를 넣어 둔다. */
+    private fun loadReplay() {
+        info.text = "주행 기록 불러오는 중..."
+        ApiClient.routeApi.getReplay().enqueue(object : Callback<ReplayTrack> {
+            override fun onResponse(call: Call<ReplayTrack>, response: Response<ReplayTrack>) {
+                val track = response.body()
+                if (track == null || track.sessionId == null || track.points.isEmpty()) {
+                    info.text = "서버에 재생할 주행 기록이 없습니다 (navi.replay.session-dir 확인)"
+                    return
+                }
+                replayPoints = track.points
+                replayIndex = 0
+                onNewLocation(toLocation(track.points.first()))
+                val last = track.points.last()
+                etDestination.setText(String.format(Locale.US, "%.6f,%.6f", last.lat, last.lng))
+                info.text = "재생 모드 · ${track.sessionId} · GPS ${track.points.size}개 · 목적지를 확인하고 안내 시작"
+            }
+            override fun onFailure(call: Call<ReplayTrack>, t: Throwable) {
+                info.text = "주행 기록 요청 실패: ${t.message}"
+            }
+        })
+    }
+
+    private fun startReplay() {
+        replayHandler.removeCallbacks(replayStep)
+        replayIndex = 0
+        replayHandler.post(replayStep)
+    }
+
+    private fun stopReplay() {
+        replayHandler.removeCallbacks(replayStep)
+    }
+
+    private fun toLocation(p: ReplayPoint): Location = Location("replay").apply {
+        latitude = p.lat
+        longitude = p.lng
+        speed = (p.speed ?: 0.0).toFloat()
+        time = p.timestampMs
+        accuracy = 0f
     }
 
     @SuppressLint("MissingPermission")
@@ -283,6 +362,7 @@ class MainActivity : AppCompatActivity() {
                     tvNavDest.text = "목적지 ${String.format("%.4f", destLat)}, ${String.format("%.4f", destLng)}"
                     setNavigatingUi(true)
                     info.text = "안내 시작 (경유점 ${body.path.size}개)"
+                    if (BuildConfig.REPLAY_MODE) startReplay()
                 } else {
                     btnRoute.isEnabled = true
                     info.text = "서버 응답 없음 (${response.code()})"
@@ -296,6 +376,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopNavigation() {
+        stopReplay()
         isNavigating = false
         lastSpokenDistance = Int.MAX_VALUE
         currentRouteId = 0
@@ -357,7 +438,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendLocationToServer(loc: Location) {
-        val update = LocationUpdate(currentRouteId, loc.latitude, loc.longitude, loc.speed.toDouble())
+        val update = LocationUpdate(currentRouteId, loc.latitude, loc.longitude, loc.speed.toDouble(), loc.time)
         ApiClient.routeApi.sendLocation(update).enqueue(object : Callback<NavResponse> {
             override fun onResponse(call: Call<NavResponse>, response: Response<NavResponse>) {
                 val nav = response.body() ?: return
@@ -372,6 +453,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleNavResponse(nav: NavResponse) {
         if (nav.arrived) {
+            stopReplay()
             isNavigating = false
             setNavigatingUi(false)
             kakaoMap.routeLineManager?.layer?.removeAll()

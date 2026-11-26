@@ -24,12 +24,15 @@ public class NavigationService {
     private static final double PASSED_DISTANCE_M = 20.0;    // 이 거리 안으로 들어오면 분기점 통과로 본다
     private static final double ARRIVED_DISTANCE_M = 30.0;   // 목적지 도착 판정 거리
 
-    // 분기점 앞/뒤 단면을 잡을 경로상 거리(m). 앞쪽은 교차로 안에 걸리면 조금씩 더 멀리 잡아 다시 시도한다.
+    // 분기점 앞 단면을 잡을 경로상 거리(m). 여러 곳에서 재 보고 차로가 가장 많은 단면을 쓴다.
+    // (교차로 바로 앞은 도류화 우회전 차로가 이미 갈라져 나가 차로 수가 줄어 있을 수 있다)
     private static final double[] BEFORE_DISTANCES_M = {30, 50, 70};
     private static final double AFTER_DISTANCE_M = 40;
     private static final double HEADING_REF_M = 10;          // 진행 방향 계산용 기준점 간격
 
     private final RoadRepository roadRepository;
+    private final LaneAiClient laneAi;
+    private final ReplaySession replay;
     private final int placeholderCurrentLane;
 
     private final AtomicInteger routeIdCounter = new AtomicInteger(0);
@@ -40,9 +43,11 @@ public class NavigationService {
     private int nextManeuverIdx = 0;
     private Point destination = null;
 
-    public NavigationService(RoadRepository roadRepository,
-                             @Value("${navi.placeholder-current-lane:2}") int placeholderCurrentLane) {
+    public NavigationService(RoadRepository roadRepository, LaneAiClient laneAi, ReplaySession replay,
+                             @Value("${navi.placeholder-current-lane:0}") int placeholderCurrentLane) {
         this.roadRepository = roadRepository;
+        this.laneAi = laneAi;
+        this.replay = replay;
         this.placeholderCurrentLane = placeholderCurrentLane;
     }
 
@@ -60,13 +65,10 @@ public class NavigationService {
     }
 
     /**
-     * @param currentLane AI가 판단한 현재 차로(왼쪽부터 1번). AI 연동 전에는 null → 임시값 사용
+     * @param appCurrentLane 앱이 직접 보낸 현재 차로(왼쪽부터 1번). 보통 null → Lane AI에 묻는다
+     * @param timestampMs    GPS 시각(UTC ms). 주행 기록 재생 때 Lane AI 재생 시각을 계산하는 데 쓴다
      */
-    public synchronized NavResponse processLocation(double lat, double lng, Integer currentLane) {
-        if (destination != null && distanceMeters(lat, lng, destination.lat(), destination.lng()) < ARRIVED_DISTANCE_M) {
-            return new NavResponse(false, null, null, null, null, null, null, "목적지에 도착했습니다.", true);
-        }
-
+    public synchronized NavResponse processLocation(double lat, double lng, Integer appCurrentLane, Long timestampMs) {
         while (nextManeuverIdx < maneuvers.size()) {
             ManeuverInfo m = maneuvers.get(nextManeuverIdx);
             if (distanceMeters(lat, lng, m.lat(), m.lng()) < PASSED_DISTANCE_M) {
@@ -76,8 +78,12 @@ public class NavigationService {
             }
         }
 
+        // 도착: 회전 지점을 모두 지난 뒤 목적지 근처에 오면 (유턴 경로는 목적지가 반대 차로라 진입 중에도 가까울 수 있다)
         if (nextManeuverIdx >= maneuvers.size()) {
-            return new NavResponse(false, null, null, null, null, null, null, null, false);
+            boolean arrived = destination != null
+                    && distanceMeters(lat, lng, destination.lat(), destination.lng()) < ARRIVED_DISTANCE_M;
+            return new NavResponse(false, null, null, null, null, null, null, arrived ? "목적지에 도착했습니다." : null,
+                    arrived, null);
         }
 
         ManeuverInfo next = maneuvers.get(nextManeuverIdx);
@@ -85,7 +91,7 @@ public class NavigationService {
         int distInt = (int) dist;
 
         if (dist > TRIGGER_DISTANCE_M) {
-            return new NavResponse(false, null, null, null, null, null, null, null, false);
+            return new NavResponse(false, null, null, null, null, null, null, null, false, null);
         }
 
         // 정밀도로지도에서 전체 차로 수와 목표 차로 조회 (분기점마다 한 번만 계산)
@@ -93,13 +99,64 @@ public class NavigationService {
         if (lanes.totalLanes() == 0) {
             // 정밀지도 범위 밖이거나 차로를 찾지 못한 경우: 회전 안내만 한다
             String message = distInt + "m 앞 " + maneuverKor(next.type()) + "입니다.";
-            return new NavResponse(true, next.type(), distInt, null, null, List.of(), List.of(), message, false);
+            return new NavResponse(true, next.type(), distInt, null, null, List.of(), List.of(), message, false, null);
         }
 
         int total = lanes.totalLanes();
-        int current = clamp(currentLane != null ? currentLane : placeholderCurrentLane, 1, total);
+        Integer current = null;
+        String source = null;
+        if (appCurrentLane != null) {
+            current = clamp(appCurrentLane, 1, total);
+            source = "APP";
+        } else {
+            current = currentLaneFromAi(lanes, timestampMs);
+            if (current != null) {
+                source = "AI";
+            } else if (placeholderCurrentLane > 0) {
+                current = clamp(placeholderCurrentLane, 1, total);
+                source = "PLACEHOLDER";
+            }
+        }
         String message = buildMessage(distInt, next.type(), current, lanes.targetLanes());
-        return new NavResponse(true, next.type(), distInt, total, current, lanes.targetLanes(), lanes.laneDirections(), message, false);
+        return new NavResponse(true, next.type(), distInt, total, current, lanes.targetLanes(), lanes.laneDirections(),
+                message, false, source);
+    }
+
+    /** 이전 버전 호환: 시각 없이 호출 */
+    public NavResponse processLocation(double lat, double lng, Integer appCurrentLane) {
+        return processLocation(lat, lng, appCurrentLane, null);
+    }
+
+    // ------------------------------------------------------------------ Lane AI
+
+    /**
+     * Lane AI에게 현재 차로를 묻고, 서버의 차로 번호(분기점 앞 단면, 왼쪽부터)로 바꾼다.
+     * AI는 현재 달리는 차로의 정밀지도 링크(mapLinkId)를 주므로, 그 링크가 이어지는 단면 차로를 찾는다.
+     * @return 모르면 null (안내는 목표 차로만 한다)
+     */
+    private Integer currentLaneFromAi(LaneGuide lanes, Long timestampMs) {
+        long elapsed = replay.elapsedMs(timestampMs);
+        if (elapsed < 0 || lanes.maneuverLinkId() == null) {
+            return null;
+        }
+        LaneAiClient.Estimate e = laneAi.replayEstimate(replay.sessionId(), lanes.maneuverLinkId(), elapsed);
+        if (e == null || !e.valid()) {
+            return null;
+        }
+        try {
+            Integer pos = roadRepository.findLanePosition(e.mapLinkId(), lanes.laneLinkIds());
+            if (pos != null) {
+                return pos;
+            }
+        } catch (Exception ex) {
+            log.warn("AI 차로 링크 대응 실패 ({}): {}", e.mapLinkId(), ex.getMessage());
+        }
+        // 링크로 못 찾으면, 화면 기준 번호(physical)이고 차로 수 안이면 AI 번호를 그대로 쓴다
+        if ("physical".equals(e.laneNumbering()) && e.currentLane() != null
+                && e.currentLane() >= 1 && e.currentLane() <= lanes.totalLanes()) {
+            return e.currentLane();
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ 목표 차로 계산
@@ -114,10 +171,7 @@ public class NavigationService {
                 Point before = pointAlong(pathIdx, beforeM, -1);
                 Point beforePrev = pointAlong(pathIdx, beforeM + HEADING_REF_M, -1);
                 LaneGuide g = roadRepository.findLaneGuide(beforePrev, before, afterPrev, after);
-                if (g.totalLanes() > 0 && !g.targetLanes().isEmpty()) {
-                    return g;
-                }
-                if (best.totalLanes() == 0) {
+                if (isBetter(g, best)) {
                     best = g;
                 }
             }
@@ -125,6 +179,16 @@ public class NavigationService {
             log.warn("목표 차로 조회 실패 (maneuver {}): {}", maneuverIdx, e.getMessage());
         }
         return best;
+    }
+
+    /** 목표 차로를 찾은 단면이 우선, 그다음은 차로가 더 많은 단면 (같으면 분기점에 가까운 앞의 것) */
+    private static boolean isBetter(LaneGuide g, LaneGuide best) {
+        boolean gHasTarget = !g.targetLanes().isEmpty();
+        boolean bestHasTarget = !best.targetLanes().isEmpty();
+        if (gHasTarget != bestHasTarget) {
+            return gHasTarget;
+        }
+        return g.totalLanes() > best.totalLanes();
     }
 
     /** 경로에서 pathIdx 지점부터 distance(m)만큼 앞(+1) 또는 뒤(-1)로 간 지점 */
@@ -164,10 +228,18 @@ public class NavigationService {
 
     // ------------------------------------------------------------------ 안내 문구
 
-    private String buildMessage(int dist, String type, int current, List<Integer> targetLanes) {
+    private String buildMessage(int dist, String type, Integer current, List<Integer> targetLanes) {
         String head = dist + "m 앞 " + maneuverKor(type) + ". ";
         if (targetLanes.isEmpty()) {
-            return head + "현재 " + current + "차로입니다.";
+            return current == null ? head.trim() : head + "현재 " + current + "차로입니다.";
+        }
+        if (current == null) {
+            // 현재 차로를 모르면 갈 차로만 알려준다
+            StringBuilder lanesText = new StringBuilder();
+            for (int i = 0; i < targetLanes.size(); i++) {
+                lanesText.append(i == 0 ? "" : ", ").append(targetLanes.get(i));
+            }
+            return head + lanesText + "차로로 가세요.";
         }
         if (targetLanes.contains(current)) {
             return head + "현재 차로를 유지하세요.";
