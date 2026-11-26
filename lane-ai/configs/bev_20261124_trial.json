@@ -1,0 +1,28 @@
+{
+  "status": "provisional; not measured calibration",
+  "common": {
+    "width": 1280,
+    "height": 720,
+    "height_m": 1.59,
+    "horizontal_fov_deg": 112,
+    "pitch_down_deg": 4.6,
+    "max_range_m": 25
+  },
+  "cameras": {
+    "left": {"yaw_deg": -36},
+    "right": {"yaw_deg": 36}
+  },
+  "camera_ground_offsets_m": {
+    "left": [-0.4375, 0.0],
+    "right": [0.4375, 0.0]
+  },
+  "assumptions": {
+    "height_and_angles": "Estimated from the mount measurements and vehicle roof height; applied symmetrically",
+    "horizontal_fov": "ELP-USBGS1200P01-H110 nominal HFOV of 112 degrees; effective field of view in the 1280x720 recording mode is unmeasured",
+    "lens_spec_url": "https://www.elpcctv.com/elp-1200p-90fps-ar0234-sensor-global-shutter-usb-camera-with-m12-no-distortion-112-degrees-lens-p-733.html",
+    "optics": "Square pixels, centered principal point, zero lens distortion and zero roll in upright saved frames",
+    "plane": "Flat ground; points on vehicles and barriers may be projected incorrectly",
+    "origins": "User-reported 0.875 m lateral lens spacing, equal forward position and centered mount. Origin is on the vehicle centerline at the camera row; not the axle or GPS antenna.",
+    "max_range": "25 m is a display and analysis cutoff, not validated range"
+  }
+}
