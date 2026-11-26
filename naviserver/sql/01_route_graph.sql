@@ -1,7 +1,8 @@
 -- =========================================================
 -- 정밀도로지도(a2_link) → pgRouting 길찾기 그래프 만들기
 -- 필요: PostGIS, pgRouting (CREATE EXTENSION pgrouting;)
--- 여러 번 실행해도 되도록 DROP 후 다시 만든다
+-- 여러 번 실행해도 되도록 DROP 후 다시 만든다.
+-- 시험 지역을 추가하면(tools/hdmap_to_sql.py) 이 파일을 다시 실행해야 새 도로로 길을 찾는다.
 -- =========================================================
 
 -- 1. 노드 번호표: 글자 노드 id → 정수 vid
@@ -15,7 +16,7 @@ FROM (
     UNION
     SELECT tonodeid   AS node_id FROM a2_link
 ) t;
--- 확인: SELECT count(*) FROM route_vertex;  → 3254
+-- 확인: SELECT count(*) FROM route_vertex;  → 3254 (기존 지역만), 4536 (인천 53호선 SEC001 추가 후)
 
 
 -- 2. 엣지: 링크 하나 = 한 방향 엣지 하나 (reverse_cost -1 = 역방향 불가)
@@ -30,7 +31,7 @@ SELECT row_number() OVER () AS id,
 FROM a2_link e
 JOIN route_vertex fv ON e.fromnodeid = fv.node_id
 JOIN route_vertex tv ON e.tonodeid   = tv.node_id;
--- 확인: SELECT count(*) FROM route_edge;  → 3410
+-- 확인: SELECT count(*) FROM route_edge;  → 3410 (기존 지역만), 4738 (추가 후)
 
 
 -- 3. 차선 변경 엣지(LC): 옆 차로 링크의 시작 노드끼리 양방향 연결
@@ -47,7 +48,13 @@ FROM a2_link a
 JOIN route_edge ea ON ea.link_id = a.id
 JOIN route_edge eb ON eb.link_id = a.r_linkid
 WHERE a.linktype <> '1';
--- 확인: SELECT count(*) FROM route_edge WHERE link_id = 'LC';  → 1435
+-- 확인: SELECT count(*) FROM route_edge WHERE link_id = 'LC';  → 1435 (기존 지역만), 2142 (추가 후)
+
+-- 조회용 인덱스 (차로 따라가기, 링크 → 엣지 찾기)
+CREATE INDEX route_edge_link_idx ON route_edge (link_id);
+CREATE INDEX route_edge_source_idx ON route_edge (source);
+CREATE INDEX route_edge_target_idx ON route_edge (target);
+ANALYZE route_edge;
 
 
 -- 4. 테스트: 16호선 2차로 → 옆 1차로 (agg_cost 319.87, LC 1번)

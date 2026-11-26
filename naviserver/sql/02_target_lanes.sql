@@ -3,8 +3,8 @@
 -- ? 순서: 분기점 앞 지점(lng, lat), 그보다 조금 앞 점(lng, lat), 분기점 앞 지점(lng, lat),
 --         분기점 뒤 지점(lng, lat), 그보다 조금 앞 점(lng, lat), 분기점 뒤 지점(lng, lat),
 --         차로를 따라갈 최대 거리(m)
--- 결과: pos(왼쪽부터 차로 번호), total(전체 차로 수), target(목표 차로 여부),
---       dirs(그 차로의 실제 진행 방향, 예: 'STRAIGHT,RIGHT')
+-- 결과: pos(왼쪽부터 차로 번호), link_id(그 차로 링크), total(전체 차로 수), target(목표 차로 여부),
+--       dirs(그 차로의 실제 진행 방향, 예: 'STRAIGHT,RIGHT'), maneuver_link(회전이 시작되는 링크, Lane AI 요청용)
 -- 방법: 1) 분기점 앞/뒤 지점에서 진행 방향이 같은 가장 가까운 차로를 찾고
 --       2) l_linkid / r_linkid 로 그 단면의 모든 차로를 모아 왼쪽부터 번호를 매긴 뒤
 --       3) 차선 변경 엣지(LC)를 뺀 그래프에서 분기점 뒤 도로까지 이어지는 차로 = 목표 차로
@@ -69,7 +69,7 @@ ordered_b AS (
 xa AS (SELECT o.id, o.pos, e.source FROM ordered_a o JOIN route_edge e ON e.link_id = o.id),
 xb AS (SELECT o.id, e.target FROM ordered_b o JOIN route_edge e ON e.link_id = o.id),
 reach AS (
-  SELECT DISTINCT d.start_vid
+  SELECT d.start_vid, d.end_vid, d.agg_cost
   FROM pgr_dijkstra(
          'SELECT id, source, target, cost, reverse_cost FROM route_edge WHERE link_id <> ''LC''',
          (SELECT array_agg(source) FROM xa),
@@ -104,10 +104,18 @@ walk AS (
   WHERE NOT w.done AND w.depth < 8 AND w.dist < 150
 ),
 -- 더 따라가지 않는 끝 지점들의 회전각(도, 시계 방향 +).
--- 교차로를 빠져나온 링크는 시작 방향, 나머지(도류화로 꺾인 링크, 지도 끝에서 끊긴 링크 등)는 끝 방향을 본다
+-- 교차로를 빠져나온 링크는 시작 방향을 본다. 교차로 없이 꺾인 링크(도류화 우회전, 유턴 연결 링크)는
+-- 꺾이는 중간에 끝날 수 있어서 그다음 링크의 시작 방향을 보고, 다음 링크가 없으면 끝 방향을 본다
 exits AS (
   SELECT DISTINCT w.pos,
-         degrees(mod(((CASE WHEN w.in_x AND h.linktype <> '1' THEN h.az_start ELSE h.az_end END) - w.ref + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric) AS deg
+         degrees(mod(((CASE
+             WHEN w.in_x AND h.linktype <> '1' THEN h.az_start
+             WHEN w.done THEN coalesce(
+               (SELECT h2.az_start FROM route_edge e2 JOIN lh h2 ON h2.id = e2.link_id
+                WHERE e2.source = w.node AND e2.link_id <> 'LC'
+                ORDER BY abs(mod((h2.az_start - h.az_end + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric)
+                LIMIT 1), h.az_end)
+             ELSE h.az_end END) - w.ref + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric) AS deg
   FROM walk w JOIN lh h ON h.id = w.link_id
   WHERE w.done OR w.depth >= 8 OR w.dist >= 150
      OR NOT EXISTS (SELECT 1 FROM route_edge e2 JOIN lh h2 ON h2.id = e2.link_id
@@ -125,7 +133,29 @@ turns AS (
               WHEN e.deg < coalesce(s.deg, 0) THEN 'LEFT'
               ELSE 'RIGHT' END AS turn
   FROM exits e LEFT JOIN straight s ON true
+),
+-- ---- 회전 연결 링크 (Lane AI 요청의 maneuverLinkId) ----
+-- 목표 차로에서 분기점 뒤까지 가장 짧은 길을 따라가다 처음으로 회전이 시작되는 링크:
+-- 교차로 링크(linktype '1')이거나, 출발 차로 방향에서 40도 넘게 꺾이는 링크(유턴 연결 링크 등)
+best AS (SELECT start_vid, end_vid FROM reach ORDER BY agg_cost LIMIT 1),
+tpath AS (
+  SELECT d.seq, e.link_id
+  FROM best CROSS JOIN LATERAL pgr_dijkstra(
+         'SELECT id, source, target, cost, reverse_cost FROM route_edge WHERE link_id <> ''LC''',
+         best.start_vid, best.end_vid, directed := true) d
+  JOIN route_edge e ON e.id = d.edge
+),
+conn AS (
+  SELECT t.link_id
+  FROM tpath t JOIN lh h ON h.id = t.link_id,
+       (SELECT h0.az_end FROM tpath t0 JOIN lh h0 ON h0.id = t0.link_id ORDER BY t0.seq LIMIT 1) r
+  WHERE t.seq > 1
+    AND (h.linktype = '1'
+         OR abs(degrees(mod((h.az_end - r.az_end + 3 * pi())::numeric, (2 * pi())::numeric) - pi()::numeric)) > 40)
+  ORDER BY t.seq LIMIT 1
 )
-SELECT a.pos, (SELECT count(*) FROM xa) AS total, (a.source IN (SELECT start_vid FROM reach)) AS target,
-       (SELECT string_agg(t.turn, ',') FROM turns t WHERE t.pos = a.pos) AS dirs
+SELECT a.pos, a.id AS link_id, (SELECT count(*) FROM xa) AS total,
+       (a.source IN (SELECT start_vid FROM reach)) AS target,
+       (SELECT string_agg(t.turn, ',') FROM turns t WHERE t.pos = a.pos) AS dirs,
+       (SELECT link_id FROM conn) AS maneuver_link
 FROM xa a ORDER BY a.pos;

@@ -64,43 +64,100 @@ cd naviserver
 
 ### 데이터베이스
 
-PostgreSQL에 PostGIS 확장을 설치한 뒤, 국토지리정보원 정밀도로지도(EPSG:5179)를 적재합니다.
+PostgreSQL에 PostGIS·pgRouting 확장을 설치한 뒤, 국토지리정보원 정밀도로지도(EPSG:5179)를 적재하고 길찾기 그래프를 만듭니다.
 
 ```sql
 CREATE EXTENSION postgis;
+CREATE EXTENSION pgrouting;
 ```
+
+시험 지역을 추가할 때는 받은 정밀도로지도 zip(또는 shp 폴더)을 SQL로 바꿔 넣고, 그래프를 다시 만듭니다.
+같은 id는 건너뛰므로 여러 번 실행해도 됩니다.
+
+```powershell
+py -m pip install pyshp
+py naviserver/sql/tools/hdmap_to_sql.py "C:\path\B110_SEC001_2023.zip" -o hdmap_b110.sql
+psql -U postgres -d lanenavi -f hdmap_b110.sql
+psql -U postgres -d lanenavi -f naviserver/sql/01_route_graph.sql
+```
+
+<br/>
+
+## 전체 시스템 실행 (주행 기록 재생)
+
+실시간 카메라 입력 전 단계라, 녹화한 주행(GPS + Lane AI 분석 결과)을 재생해 **앱 → 서버 → 정밀지도 DB → Lane AI → 앱** 전체를 돌립니다.
+AI 담당에게 받을 파일: 세션 폴더(`recording.json`, `gps.csv`)와 분석 결과(`unified_uturn_final.json` 등). 자세한 AI API는
+[유턴 재생 연동 안내](lane-ai/docs/server-replay-integration.md)를 봅니다.
+
+1. **Lane AI 재생 API** (같은 노트북, 포트 8765)
+
+   ```powershell
+   py lane-ai\scripts\serve_lane_replay.py --result <분석결과.json> --recording <세션폴더>\recording.json
+   ```
+
+2. **서버**: IntelliJ 실행 설정의 환경변수에 아래를 추가하고 실행합니다.
+
+   | 환경변수 | 값 |
+   |---|---|
+   | `DB_PASSWORD`, `KAKAO_REST_KEY` | 기존과 같음 |
+   | `REPLAY_SESSION_DIR` | `recording.json`, `gps.csv`가 있는 세션 폴더 |
+   | `LANE_AI_URL` | 기본 `http://127.0.0.1:8765` (다르면 지정) |
+
+3. **폰 없이 확인**: 서버가 받는 그대로 GPS를 보내고 안내를 출력합니다.
+
+   ```powershell
+   py naviserver\tools\replay_client.py --speed 5
+   ```
+
+   회전 지점 300m 안에서 `현재 2(AI) … 왼쪽으로 1차로 이동하세요` → `현재 1(AI) … 현재 차로를 유지하세요`처럼 바뀌면 연결 성공입니다.
+
+4. **앱**: `MyNavi/local.properties`에 아래를 넣고 빌드합니다. 앱이 서버의 주행 기록을 받아 첫 위치에 차를 두고
+   목적지 칸에 마지막 위치를 채웁니다. **안내 시작**을 누르면 기록대로 달리며 차로 안내가 나옵니다.
+
+   ```properties
+   REPLAY_MODE=true
+   REPLAY_SPEED=1
+   ```
+
+   실제 주행으로 돌아갈 때는 `REPLAY_MODE=false`(또는 삭제)로 다시 빌드합니다.
+
+AI가 꺼져 있거나 그 회전 지점 자료가 없으면 서버는 현재 차로 없이 "1차로로 가세요"처럼 목표 차로만 안내합니다.
 
 <br/>
 
 ## API
 
-### 경로 조회
+### `POST /api/route` — 경로 만들기 (주행마다 한 번)
 
-```http
-POST /api/route
+```json
+{ "start": { "lat": 37.4457, "lng": 126.6574 }, "end": { "lat": 37.4435, "lng": 126.6500 } }
 ```
 
-**Request**
+응답: `{ "routeId": 1, "path": [ { "lat": 37.4457, "lng": 126.6574 }, ... ] }`
+
+### `POST /api/location` — 현재 위치 (1초마다)
+
+```json
+{ "routeId": 1, "lat": 37.4476, "lng": 126.6526, "speed": 10.2, "timestampMs": 1795000037000 }
+```
+
+`timestampMs`(GPS 시각, UTC ms)는 재생 모드에서 Lane AI 재생 시각을 맞추는 데 씁니다. `currentLane`을 보내면 AI 대신 그 값을 씁니다.
 
 ```json
 {
-  "startLat": 37.4501,
-  "startLng": 126.6531,
-  "endLat": 37.4612,
-  "endLng": 126.6702
+  "guide": true, "maneuver": "UTURN", "distanceToBranch": 247,
+  "totalLanes": 5, "currentLane": 2, "currentLaneSource": "AI",
+  "targetLanes": [1], "laneDirections": [["UTURN"], ["STRAIGHT"], ["STRAIGHT"], ["STRAIGHT"], ["STRAIGHT", "RIGHT"]],
+  "message": "247m 앞 유턴. 현재 2차로, 왼쪽으로 1차로 이동하세요.", "arrived": false
 }
 ```
 
-**Response**
+차로 번호는 진행 방향 왼쪽부터 1번(좌회전·유턴 포켓 포함)입니다. 현재 차로를 모르면 `currentLane`은 `null`입니다.
 
-```json
-{
-  "path": [
-    { "lat": 37.4501, "lng": 126.6531 },
-    { "lat": 37.4523, "lng": 126.6558 }
-  ]
-}
-```
+### `GET /api/replay` — 재생할 주행 기록
+
+`{ "sessionId": "...", "recordingStartMs": ..., "points": [ { "timestampMs": ..., "lat": ..., "lng": ..., "speed": ... } ] }`
+(재생 기록이 없으면 `sessionId`가 `null`)
 
 <br/>
 
