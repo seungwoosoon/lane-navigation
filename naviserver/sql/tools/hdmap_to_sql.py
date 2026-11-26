@@ -173,12 +173,16 @@ BEGIN
           AND EXISTS (SELECT 1 FROM information_schema.columns s
                       WHERE s.table_schema = 'hdmap_import' AND s.table_name = l AND s.column_name = c.attname);
 
+        -- 좌표 차원 맞추기: 2D / 3D(Z) / 3D(M) / 4D(ZM). shp2pgsql 로 넣은 테이블은 보통 ZM(4차원)이다
         src := 's.geom';
         IF gdims = 2 THEN src := format('ST_Force2D(%s)', src);
+        ELSIF gdims = 3 AND gtype LIKE '%M' THEN src := format('ST_Force3DM(%s)', src);
         ELSIF gdims = 3 THEN src := format('ST_Force3DZ(%s)', src);
+        ELSIF gdims = 4 THEN src := format('ST_Force4D(%s)', src);
         END IF;
         IF gtype LIKE 'MULTI%' THEN src := format('ST_Multi(%s)', src);
-        ELSIF gtype IN ('POINT', 'LINESTRING', 'POLYGON') THEN src := format('ST_GeometryN(%s, 1)', src);
+        ELSIF gtype IN ('POINT', 'LINESTRING', 'POLYGON', 'POINTM', 'LINESTRINGM', 'POLYGONM') THEN
+            src := format('ST_GeometryN(%s, 1)', src);
         END IF;
 
         EXECUTE format(
