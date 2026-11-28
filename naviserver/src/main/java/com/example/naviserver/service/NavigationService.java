@@ -22,6 +22,10 @@ public class NavigationService {
 
     private static final double TRIGGER_DISTANCE_M = 300.0;  // 분기점 안내 시작 거리 (AI 연동 후 속도 기반으로 변경 예정)
     private static final double PASSED_DISTANCE_M = 20.0;    // 이 거리 안으로 들어오면 분기점 통과로 본다
+    // 카카오 회전 지점은 실제로 도는 자리와 수십 m 어긋날 수 있다 (11/24 유턴: 약 50m 뒤).
+    // 그래서 이 거리 안까지 왔다가, 가장 가까웠던 거리보다 PASS_AWAY_M 이상 멀어져도 통과로 본다.
+    private static final double PASS_NEAR_M = 100.0;
+    private static final double PASS_AWAY_M = 25.0;
     private static final double ARRIVED_DISTANCE_M = 30.0;   // 목적지 도착 판정 거리
 
     // 분기점 앞 단면을 잡을 경로상 거리(m). 여러 곳에서 재 보고 차로가 가장 많은 단면을 쓴다.
@@ -41,6 +45,7 @@ public class NavigationService {
     private List<Integer> maneuverPathIdx = List.of();
     private final Map<Integer, LaneGuide> laneGuideCache = new HashMap<>();
     private int nextManeuverIdx = 0;
+    private double closestToNextM = Double.MAX_VALUE;  // 다음 분기점에 가장 가까웠던 거리
     private Point destination = null;
 
     // AI가 마지막으로 알려준 차로. AI가 잠깐 모를 때(분석 구간 끝, 일시 오류) 가까운 거리 안에서는 이 값을 이어 쓴다
@@ -66,6 +71,7 @@ public class NavigationService {
         }
         this.laneGuideCache.clear();
         this.nextManeuverIdx = 0;
+        this.closestToNextM = Double.MAX_VALUE;
         this.destination = destination;
         this.lastAiLane = null;
         this.lastAiManeuverIdx = -1;
@@ -80,8 +86,13 @@ public class NavigationService {
     public synchronized NavResponse processLocation(double lat, double lng, Integer appCurrentLane, Long timestampMs) {
         while (nextManeuverIdx < maneuvers.size()) {
             ManeuverInfo m = maneuvers.get(nextManeuverIdx);
-            if (distanceMeters(lat, lng, m.lat(), m.lng()) < PASSED_DISTANCE_M) {
+            double d = distanceMeters(lat, lng, m.lat(), m.lng());
+            closestToNextM = Math.min(closestToNextM, d);
+            boolean passed = d < PASSED_DISTANCE_M
+                    || (closestToNextM < PASS_NEAR_M && d > closestToNextM + PASS_AWAY_M);
+            if (passed) {
                 nextManeuverIdx++;
+                closestToNextM = Double.MAX_VALUE;
             } else {
                 break;
             }
